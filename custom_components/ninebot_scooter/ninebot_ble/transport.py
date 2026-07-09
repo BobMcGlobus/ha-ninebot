@@ -146,6 +146,14 @@ class NinebotClient:
                 # If we get here, the button on the scooter need to be pressed.
                 _LOGGER.info("Please press power button on scooter!")
 
+        # Ensure the encrypted session key includes the app data even when the
+        # pairing loop above was skipped/short-circuited (e.g. the scooter reports
+        # it is already paired and PING returns data_index == 1, or pairing
+        # completes via a PAIR response). Without this, reads on a reconnect are
+        # decrypted with the wrong key and fail.
+        if self.crypto.app_data is None:
+            self.crypto.set_app_data(self.APP_KEY)
+
         # Pair
         await self.request(Packet(DeviceId.PC, DeviceId.ES_BLE, Command.PAIR, 0, received_serial))
 

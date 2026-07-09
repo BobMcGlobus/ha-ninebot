@@ -31,38 +31,49 @@ class NinebotBleSensor(BluetoothData):
             await self.client.disconnect()
 
     async def async_poll(self, device: BLEDevice) -> SensorUpdate:
-        """Poll all data from Scooter."""
-        _LOGGER.debug("Polling scooter, currently connected: %s", self.client.is_connected)
-        if not self.client.is_connected or self.device is None or self.device != device:
-            await self.client.disconnect()
-            self.client = NinebotClient()
-            await self.client.connect(device)
-            self.device = device
+        """Poll all data from Scooter.
 
-        serial = await self.client.read_reg(CtrlIdx.NB_INF_SN)
+        Home Assistant's active bluetooth poller is advertisement-driven: it only
+        schedules the next poll when it hears a new advertisement. A connected BLE
+        peripheral stops advertising, so if we kept the connection open the values
+        would freeze after the first poll. We therefore connect fresh and
+        disconnect again at the end of every poll, which lets the scooter resume
+        advertising so the next advertisement schedules the next poll (throttled to
+        ~10s apart by HA). Reconnects reuse the same in-process app key, so no
+        button press is needed after the initial pairing.
+        """
+        _LOGGER.debug("Polling scooter %s", device.address)
+        await self.client.disconnect()
+        self.client = NinebotClient()
+        await self.client.connect(device)
+        self.device = device
         try:
-            parsed_sn = SerialParser(serial)
-            self.set_title(str(parsed_sn))
-            self.set_device_type(str(parsed_sn))
-            self.set_device_hw_version(
-                f"Rev {parsed_sn.product_revision}, {parsed_sn.production_date.year}/{parsed_sn.production_date.month}"
-            )
-        except ValueError as e:
-            _LOGGER.warn("Failed to parse scooter serial number: %s", e)
-            self.set_title(device.name or device.address)
-            self.set_device_type("Ninebot scooter")
+            serial = await self.client.read_reg(CtrlIdx.NB_INF_SN)
+            try:
+                parsed_sn = SerialParser(serial)
+                self.set_title(str(parsed_sn))
+                self.set_device_type(str(parsed_sn))
+                self.set_device_hw_version(
+                    f"Rev {parsed_sn.product_revision}, {parsed_sn.production_date.year}/{parsed_sn.production_date.month}"
+                )
+            except ValueError as e:
+                _LOGGER.warning("Failed to parse scooter serial number: %s", e)
+                self.set_title(device.name or device.address)
+                self.set_device_type("Ninebot scooter")
 
-        sw_version = await self.client.read_reg(CtrlIdx.NB_FW_VER)
-        self.set_device_sw_version(sw_version)
+            sw_version = await self.client.read_reg(CtrlIdx.NB_FW_VER)
+            self.set_device_sw_version(sw_version)
 
-        for idx in iter_register(CtrlIdx, BmsIdx):
-            entry = get_register_desc(idx)
-            val = await self.client.read_reg(idx)
-            if isinstance(val, enum.Enum):
-                val = val.name
-            self.update_sensor(str(idx), entry.unit, val, entry.device_class, str(idx))
+            for idx in iter_register(CtrlIdx, BmsIdx):
+                entry = get_register_desc(idx)
+                val = await self.client.read_reg(idx)
+                if isinstance(val, enum.Enum):
+                    val = val.name
+                self.update_sensor(str(idx), entry.unit, val, entry.device_class, str(idx))
 
-        return self._finish_update()
+            return self._finish_update()
+        finally:
+            await self.client.disconnect()
 
     def supported(self, data: BluetoothServiceInfo) -> bool:
         """Return True if the device is supported.
