@@ -101,4 +101,4 @@ class NinebotSensor(NinebotEntity, SensorEntity):
     @property
     def native_value(self) -> str | int | float | None:
         """Return the current register value."""
-        return self.coordinator.data.get(self.entity_description.reg_key)
+        return (self.coordinator.data or {}).get(self.entity_description.reg_key)

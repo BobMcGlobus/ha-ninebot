@@ -80,7 +80,7 @@ class NinebotSelect(NinebotEntity, SelectEntity):
         The coordinator stores enum registers as their member name (e.g. "SPORT"),
         which is exactly our option label.
         """
-        value = self.coordinator.data.get(str(self.entity_description.register))
+        value = (self.coordinator.data or {}).get(str(self.entity_description.register))
         if value in self.entity_description.to_value:
             return str(value)
         return None

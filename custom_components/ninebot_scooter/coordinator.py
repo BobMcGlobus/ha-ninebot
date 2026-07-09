@@ -1,19 +1,31 @@
-"""DataUpdateCoordinator owning the BLE lifecycle for a Ninebot scooter."""
+"""DataUpdateCoordinator owning the BLE lifecycle for a Ninebot scooter.
+
+Polling is passive/advertisement-driven: Home Assistant listens for the scooter's
+Bluetooth advertisement and only opens a connection when the scooter is actually
+seen (awake and in range), throttled to the configured interval. There is no
+periodic timer, so a sleeping scooter is never dialled.
+"""
 from __future__ import annotations
 
 import asyncio
 import enum
 import logging
-from datetime import timedelta
+import time
 from typing import Any, Awaitable, Callable, TypeVar
 
 from homeassistant.components import bluetooth
+from homeassistant.components.bluetooth import (
+    BluetoothChange,
+    BluetoothScanningMode,
+    BluetoothServiceInfoBleak,
+)
+from homeassistant.components.bluetooth.match import BluetoothCallbackMatcher
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .const import CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL, DOMAIN
-from .ninebot_ble import BmsIdx, CtrlIdx, NinebotClient, get_register_desc, iter_register
+from .const import CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL
+from .ninebot_ble import BmsIdx, CtrlIdx, NinebotClient, iter_register
 from .ninebot_ble.serial_parser import SerialParser
 
 _LOGGER = logging.getLogger(__name__)
@@ -22,32 +34,78 @@ _T = TypeVar("_T")
 
 
 class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
-    """Connect-per-poll coordinator for a single scooter.
+    """Advertisement-triggered, connect-per-poll coordinator for one scooter.
 
     The whole BLE session (connect -> auth -> action -> disconnect) is wrapped in
-    :meth:`_with_client`, so both the periodic poll and one-off writes go through
-    one place and are serialised by a single lock. Disconnecting after every
-    session lets the scooter keep advertising so Home Assistant can always find it
-    again for the next connection.
+    :meth:`_with_client`, serialised by a single lock, so both the poll and one-off
+    writes go through one place. Disconnecting after every session lets the scooter
+    keep advertising so it can always be found again.
     """
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
-        interval = entry.options.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL)
         super().__init__(
             hass,
             _LOGGER,
             config_entry=entry,
             name=entry.title,
-            update_interval=timedelta(seconds=interval),
+            update_interval=None,  # advertisement-driven, no periodic timer
         )
         self.address: str = entry.unique_id  # type: ignore[assignment]
+        self._min_interval: float = float(
+            entry.options.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL)
+        )
         self._lock = asyncio.Lock()
+        self._last_poll = 0.0
 
         # Cached device metadata (read once, on the first successful poll).
         self.serial: str | None = None
         self.model: str | None = None
         self.hw_version: str | None = None
         self.sw_version: str | None = None
+
+    # -- Bluetooth presence wiring ------------------------------------------------
+
+    @callback
+    def async_start_bluetooth(self) -> CALLBACK_TYPE:
+        """Start listening for the scooter's advertisement. Returns an unsub."""
+        unsubs = [
+            bluetooth.async_register_callback(
+                self.hass,
+                self._async_on_advertisement,
+                BluetoothCallbackMatcher(address=self.address, connectable=False),
+                BluetoothScanningMode.PASSIVE,
+            ),
+            bluetooth.async_track_unavailable(
+                self.hass, self._async_on_unavailable, self.address, connectable=False
+            ),
+        ]
+
+        @callback
+        def _unsub() -> None:
+            for unsub in unsubs:
+                unsub()
+
+        return _unsub
+
+    @callback
+    def _async_on_advertisement(
+        self, service_info: BluetoothServiceInfoBleak, change: BluetoothChange
+    ) -> None:
+        """Scooter is advertising: poll it if the throttle window has elapsed."""
+        now = time.monotonic()
+        if self._lock.locked() or now - self._last_poll < self._min_interval:
+            return
+        self._last_poll = now
+        self.hass.async_create_task(
+            self.async_refresh(), "ninebot_scooter poll", eager_start=False
+        )
+
+    @callback
+    def _async_on_unavailable(self, service_info: BluetoothServiceInfoBleak) -> None:
+        """Scooter is no longer heard; keep last values, just note it."""
+        _LOGGER.debug("Scooter %s no longer seen over Bluetooth", self.address)
+
+    # -- BLE session --------------------------------------------------------------
 
     async def _with_client(self, action: Callable[[NinebotClient], Awaitable[_T]]) -> _T:
         """Run ``action`` inside a fresh, authenticated BLE session."""
@@ -113,4 +171,5 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             await client.write_reg(index, raw_value)
 
         await self._with_client(_write)
+        self._last_poll = time.monotonic()
         await self.async_request_refresh()

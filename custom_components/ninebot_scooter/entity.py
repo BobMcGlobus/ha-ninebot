@@ -13,6 +13,11 @@ class NinebotEntity(CoordinatorEntity[NinebotCoordinator]):
 
     _attr_has_entity_name = True
 
+    @property
+    def available(self) -> bool:
+        """Available once we have at least one successful poll."""
+        return super().available and self.coordinator.data is not None
+
     def __init__(self, coordinator: NinebotCoordinator) -> None:
         super().__init__(coordinator)
         address = coordinator.address

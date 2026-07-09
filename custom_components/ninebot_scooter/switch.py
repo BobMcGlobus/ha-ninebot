@@ -68,7 +68,7 @@ class NinebotSwitch(NinebotEntity, SwitchEntity):
     @property
     def is_on(self) -> bool | None:
         """Return True if the control is on."""
-        value = self.coordinator.data.get(str(self.entity_description.register))
+        value = (self.coordinator.data or {}).get(str(self.entity_description.register))
         if value is None:
             return None
         return int(value) != self.entity_description.off_value

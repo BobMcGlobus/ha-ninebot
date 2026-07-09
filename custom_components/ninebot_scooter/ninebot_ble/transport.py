@@ -104,10 +104,11 @@ class NinebotClient:
         self.receive_buffer = bytearray()
         self.client: BleakClient | None = None
 
-    async def connect(self, device: BLEDevice) -> None:
+    async def connect(self, device: BLEDevice, pair_timeout: float = 45.0) -> None:
         """Connect and handshake the scooter.
 
-        This function must be called before any other.
+        This function must be called before any other. ``pair_timeout`` bounds how
+        long the initial pairing waits for the user to press the power button.
         """
         self.crypto.set_name(device.name.encode() if device.name else b"Unnamed")
 
@@ -129,8 +130,11 @@ class NinebotClient:
         # Ping
         resp = await self.request(Packet(DeviceId.PC, DeviceId.ES_BLE, Command.PING, 0, self.APP_KEY))
         if resp.data_index == 0:
-            # Zero (0) indicates we are not paired yet.
-            while True:
+            # Zero (0) indicates we are not paired yet. Loop for a bounded time
+            # waiting for the user to confirm pairing with the power button.
+            paired = False
+            deadline = time.time() + pair_timeout
+            while time.time() < deadline:
                 await asyncio.sleep(1.0)
                 # Sending pair request here seem to pair the device. Unclear why.
                 await self.send(Packet(DeviceId.PC, DeviceId.ES_BLE, Command.PAIR, 0, received_serial))
@@ -140,11 +144,17 @@ class NinebotClient:
                     pass
                 if resp.command == Command.PING and resp.data_index == 1:
                     self.crypto.set_app_data(self.APP_KEY)
+                    paired = True
                     break
                 if resp.command == Command.PAIR and resp.data_index == 1:
+                    paired = True
                     break
                 # If we get here, the button on the scooter need to be pressed.
                 _LOGGER.info("Please press power button on scooter!")
+            if not paired:
+                raise TimeoutError(
+                    "Pairing not confirmed - press the scooter's power button during setup"
+                )
 
         # Ensure the encrypted session key includes the app data even when the
         # pairing loop above was skipped/short-circuited (e.g. the scooter reports
@@ -154,8 +164,17 @@ class NinebotClient:
         if self.crypto.app_data is None:
             self.crypto.set_app_data(self.APP_KEY)
 
-        # Pair
-        await self.request(Packet(DeviceId.PC, DeviceId.ES_BLE, Command.PAIR, 0, received_serial))
+        # Final PAIR handshake. Best-effort: some firmwares don't acknowledge a
+        # redundant PAIR when the scooter is already registered from a previous
+        # session, so a missing response here must not fail the connection - the
+        # encrypted session is already established for reads.
+        try:
+            await self.request(
+                Packet(DeviceId.PC, DeviceId.ES_BLE, Command.PAIR, 0, received_serial),
+                timeout=3,
+            )
+        except TimeoutError:
+            _LOGGER.debug("Final PAIR not acknowledged; continuing (likely already paired)")
 
         _LOGGER.debug("Connected and authenticated successfully!")
 
