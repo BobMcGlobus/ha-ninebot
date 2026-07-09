@@ -11,6 +11,7 @@ import asyncio
 import enum
 import logging
 import time
+from datetime import datetime
 from typing import Any, Awaitable, Callable, TypeVar
 
 from homeassistant.components import bluetooth
@@ -23,6 +24,7 @@ from homeassistant.components.bluetooth.match import BluetoothCallbackMatcher
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.util import dt as dt_util
 
 from .const import CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL
 from .ninebot_ble import BmsIdx, CtrlIdx, NinebotClient, iter_register
@@ -56,7 +58,11 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             entry.options.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL)
         )
         self._lock = asyncio.Lock()
-        self._last_poll = 0.0
+        self._last_success = 0.0  # monotonic time of last SUCCESSFUL poll
+        self._poll_task: asyncio.Task | None = None
+
+        # Wall-clock time of the last successful poll (for the "last updated" sensor).
+        self.last_update_time: datetime | None = None
 
         # Cached device metadata (read once, on the first successful poll).
         self.serial: str | None = None
@@ -92,12 +98,16 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def _async_on_advertisement(
         self, service_info: BluetoothServiceInfoBleak, change: BluetoothChange
     ) -> None:
-        """Scooter is advertising: poll it if the throttle window has elapsed."""
-        now = time.monotonic()
-        if self._lock.locked() or now - self._last_poll < self._min_interval:
+        """Scooter is advertising: poll it, unless one is running or too recent."""
+        # Don't overlap an in-flight poll.
+        if self._poll_task is not None and not self._poll_task.done():
             return
-        self._last_poll = now
-        self.hass.async_create_task(
+        # Throttle by time since last SUCCESS. Failed polls are NOT throttled, so
+        # the next advertisement retries immediately - important because the
+        # scooter is often only awake for a short window (arriving/leaving).
+        if time.monotonic() - self._last_success < self._min_interval:
+            return
+        self._poll_task = self.hass.async_create_task(
             self.async_refresh(), "ninebot_scooter poll", eager_start=False
         )
 
@@ -159,11 +169,15 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return data
 
         try:
-            return await self._with_client(_read_all)
+            data = await self._with_client(_read_all)
         except UpdateFailed:
             raise
         except Exception as err:  # noqa: BLE001
             raise UpdateFailed(f"Error communicating with scooter: {err}") from err
+
+        self.last_update_time = dt_util.utcnow()
+        self._last_success = time.monotonic()
+        return data
 
     async def async_write_register(self, index: CtrlIdx | BmsIdx, raw_value: int) -> None:
         """Write a raw register value, then refresh so state reflects the device."""
@@ -172,5 +186,4 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             await client.write_reg(index, raw_value)
 
         await self._with_client(_write)
-        self._last_poll = time.monotonic()
         await self.async_request_refresh()

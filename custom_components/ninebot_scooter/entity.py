@@ -15,8 +15,15 @@ class NinebotEntity(CoordinatorEntity[NinebotCoordinator]):
 
     @property
     def available(self) -> bool:
-        """Available once we have at least one successful poll."""
-        return super().available and self.coordinator.data is not None
+        """Stay available once we have data, and keep the last values.
+
+        The scooter is only reachable while it is awake (a few times a day). We
+        deliberately do NOT tie availability to the latest poll's success, so the
+        last known values remain visible between rides instead of dropping to
+        "unavailable". Freshness is exposed separately via the "Last updated"
+        sensor.
+        """
+        return self.coordinator.data is not None
 
     def __init__(self, coordinator: NinebotCoordinator) -> None:
         super().__init__(coordinator)

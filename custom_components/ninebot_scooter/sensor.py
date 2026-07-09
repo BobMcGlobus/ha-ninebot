@@ -2,16 +2,20 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 
 from homeassistant.components.sensor import (
+    RestoreSensor,
     SensorDeviceClass,
     SensorEntity,
     SensorEntityDescription,
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
 from .coordinator import NinebotCoordinator
@@ -81,13 +85,19 @@ async def async_setup_entry(
 ) -> None:
     """Set up the Ninebot sensors."""
     coordinator: NinebotCoordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities(
+    entities: list[SensorEntity] = [
         NinebotSensor(coordinator, description) for description in _build_descriptions()
-    )
+    ]
+    entities.append(NinebotLastUpdateSensor(coordinator))
+    async_add_entities(entities)
 
 
-class NinebotSensor(NinebotEntity, SensorEntity):
-    """A single register exposed as a sensor."""
+class NinebotSensor(NinebotEntity, RestoreSensor):
+    """A single register exposed as a sensor.
+
+    Uses RestoreSensor so the last value survives a Home Assistant restart until
+    the scooter is next awake and polled.
+    """
 
     entity_description: NinebotSensorEntityDescription
 
@@ -97,8 +107,54 @@ class NinebotSensor(NinebotEntity, SensorEntity):
         super().__init__(coordinator)
         self.entity_description = description
         self._attr_unique_id = f"{coordinator.address}_{description.key}"
+        self._restored_value: str | int | float | None = None
+
+    async def async_added_to_hass(self) -> None:
+        """Restore the previous value on startup."""
+        await super().async_added_to_hass()
+        if (last := await self.async_get_last_sensor_data()) is not None:
+            self._restored_value = last.native_value
 
     @property
     def native_value(self) -> str | int | float | None:
-        """Return the current register value."""
-        return (self.coordinator.data or {}).get(self.entity_description.reg_key)
+        """Return the current register value, or the last known one."""
+        current = (self.coordinator.data or {}).get(self.entity_description.reg_key)
+        return current if current is not None else self._restored_value
+
+    @property
+    def available(self) -> bool:
+        """Available whenever we have any value to show (current or restored)."""
+        return self.native_value is not None
+
+
+class NinebotLastUpdateSensor(NinebotEntity, RestoreSensor):
+    """Timestamp of the last successful poll (i.e. how fresh the values are)."""
+
+    _attr_name = "Last updated"
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: NinebotCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{coordinator.address}_last_updated"
+        self._restored: datetime | None = None
+
+    async def async_added_to_hass(self) -> None:
+        """Restore the previous timestamp on startup."""
+        await super().async_added_to_hass()
+        if (last := await self.async_get_last_sensor_data()) is not None:
+            value = last.native_value
+            if isinstance(value, str):
+                value = dt_util.parse_datetime(value)
+            if isinstance(value, datetime):
+                self._restored = value
+
+    @property
+    def native_value(self) -> datetime | None:
+        """Return the time of the last successful poll."""
+        return self.coordinator.last_update_time or self._restored
+
+    @property
+    def available(self) -> bool:
+        """Available once we have ever polled successfully."""
+        return self.native_value is not None
