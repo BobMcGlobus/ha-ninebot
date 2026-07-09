@@ -1,0 +1,19 @@
+{
+  "domain": "ninebot_scooter",
+  "name": "Ninebot Scooter",
+  "bluetooth": [
+    {
+      "manufacturer_id": 16974
+    }
+  ],
+  "codeowners": ["@BobMcGlobus"],
+  "config_flow": true,
+  "dependencies": ["bluetooth_adapters"],
+  "documentation": "https://github.com/BobMcGlobus/ha-ninebot",
+  "integration_type": "device",
+  "iot_class": "local_push",
+  "issue_tracker": "https://github.com/BobMcGlobus/ha-ninebot/issues",
+  "loggers": ["custom_components.ninebot_scooter"],
+  "requirements": [],
+  "version": "0.1.0"
+}

@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# Reverse-engineering / de-risk scripts (may contain device secrets)
+probe.py
+raw_dump.py
+scratch_*.py
+secrets.*
+*.local
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+
+# Local-only: environment notes (contains private network details) & tooling
+lernings.md
+.claude/

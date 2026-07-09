@@ -1,0 +1,22 @@
+{
+  "config": {
+    "flow_title": "{name}",
+    "step": {
+      "bluetooth_confirm": {
+        "description": "Möchtest du {name} einrichten?\n\nDrücke bei Aufforderung einmal den Power-Knopf am Roller, um das Pairing zu bestätigen."
+      },
+      "user": {
+        "description": "Wähle den einzurichtenden Ninebot-Roller aus.",
+        "data": {
+          "address": "Bluetooth-Gerät"
+        }
+      }
+    },
+    "abort": {
+      "no_devices_found": "Kein nicht eingerichteter Ninebot-Roller in der Nähe gefunden. Wecke den Roller auf und stelle sicher, dass er in Bluetooth-Reichweite ist.",
+      "already_configured": "Dieser Roller ist bereits eingerichtet.",
+      "already_in_progress": "Die Einrichtung läuft bereits.",
+      "not_supported": "Dieses Gerät wird nicht unterstützt."
+    }
+  }
+}
