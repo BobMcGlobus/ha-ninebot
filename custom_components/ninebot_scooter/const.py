@@ -11,6 +11,9 @@ PLATFORMS: list[Platform] = [
     Platform.SELECT,
 ]
 
+# Entry data
+CONF_APP_KEY = "app_key"  # hex-encoded 16-byte pairing key, persisted per entry
+
 # Options
 CONF_POLL_INTERVAL = "poll_interval"
 DEFAULT_POLL_INTERVAL = 30  # seconds

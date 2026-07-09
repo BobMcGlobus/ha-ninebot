@@ -96,9 +96,11 @@ class Packet:
 
 
 class NinebotClient:
-    APP_KEY = secrets.token_bytes(16)
-
-    def __init__(self) -> None:
+    def __init__(self, app_key: bytes | None = None) -> None:
+        # The app key is registered on the scooter during pairing. Reuse a
+        # persisted key across sessions so pairing (a power-button press) is only
+        # needed once; fall back to a random key if none is supplied.
+        self.app_key = app_key if app_key is not None else secrets.token_bytes(16)
         self.crypto = NbCrypto()
         self.receive_queue: asyncio.Queue[Packet] = asyncio.Queue(100)
         self.receive_buffer = bytearray()
@@ -128,7 +130,7 @@ class NinebotClient:
         self.crypto.set_ble_data(received_key)
 
         # Ping
-        resp = await self.request(Packet(DeviceId.PC, DeviceId.ES_BLE, Command.PING, 0, self.APP_KEY))
+        resp = await self.request(Packet(DeviceId.PC, DeviceId.ES_BLE, Command.PING, 0, self.app_key))
         if resp.data_index == 0:
             # Zero (0) indicates we are not paired yet. Loop for a bounded time
             # waiting for the user to confirm pairing with the power button.
@@ -143,7 +145,7 @@ class NinebotClient:
                 except TimeoutError:
                     pass
                 if resp.command == Command.PING and resp.data_index == 1:
-                    self.crypto.set_app_data(self.APP_KEY)
+                    self.crypto.set_app_data(self.app_key)
                     paired = True
                     break
                 if resp.command == Command.PAIR and resp.data_index == 1:
@@ -162,7 +164,7 @@ class NinebotClient:
         # completes via a PAIR response). Without this, reads on a reconnect are
         # decrypted with the wrong key and fail.
         if self.crypto.app_data is None:
-            self.crypto.set_app_data(self.APP_KEY)
+            self.crypto.set_app_data(self.app_key)
 
         # Final PAIR handshake. Best-effort: some firmwares don't acknowledge a
         # redundant PAIR when the scooter is already registered from a previous

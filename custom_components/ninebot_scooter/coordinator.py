@@ -42,7 +42,7 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     keep advertising so it can always be found again.
     """
 
-    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry, app_key: bytes) -> None:
         super().__init__(
             hass,
             _LOGGER,
@@ -51,6 +51,7 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             update_interval=None,  # advertisement-driven, no periodic timer
         )
         self.address: str = entry.unique_id  # type: ignore[assignment]
+        self._app_key = app_key
         self._min_interval: float = float(
             entry.options.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL)
         )
@@ -116,7 +117,7 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if ble_device is None:
                 raise UpdateFailed(f"{self.address} is not in Bluetooth range")
 
-            client = NinebotClient()
+            client = NinebotClient(app_key=self._app_key)
             try:
                 await client.connect(ble_device)
                 return await action(client)
