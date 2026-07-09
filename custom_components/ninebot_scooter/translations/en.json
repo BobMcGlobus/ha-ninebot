@@ -3,7 +3,7 @@
     "flow_title": "{name}",
     "step": {
       "bluetooth_confirm": {
-        "description": "Do you want to set up {name}?\n\nWhen prompted, press the power button on the scooter once to confirm pairing."
+        "description": "Do you want to set up {name}?\n\nAfter setup, on the first poll press the power button on the scooter once when asked, to confirm pairing."
       },
       "user": {
         "description": "Choose the Ninebot scooter to set up.",
@@ -17,6 +17,19 @@
       "already_configured": "This scooter is already configured.",
       "already_in_progress": "Configuration is already in progress.",
       "not_supported": "This device is not supported."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Ninebot options",
+        "data": {
+          "poll_interval": "Polling interval (seconds)"
+        },
+        "data_description": {
+          "poll_interval": "How often to connect and read the scooter while it is awake. Lower is more responsive but uses more Bluetooth airtime and battery."
+        }
+      }
     }
   }
 }

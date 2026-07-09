@@ -244,6 +244,28 @@ class NinebotClient:
             unpacked = reg.scaler(unpacked)
         return unpacked
 
+    async def write_reg(self, index: CtrlIdx | BmsIdx, value: int) -> None:
+        """Write a 16-bit little-endian raw value to a control-table register.
+
+        ``value`` is the raw register value (i.e. already scaled to the device's
+        integer representation, NOT the human-facing unit). Uses the
+        "write, no reply" command (0x03); confirm the effect by re-reading the
+        register afterwards.
+
+        NOTE: the write path is community-derived and not verified across all
+        models/firmwares. Callers should treat writes as best-effort and read
+        back to confirm.
+        """
+        if isinstance(index, CtrlIdx):
+            target = DeviceId.ES_CONTROL
+        else:
+            target = DeviceId.ES_BATT
+
+        reg = get_register_desc(index)
+        payload = [value & 0xFF, (value >> 8) & 0xFF]
+        _LOGGER.debug("Writing register %s (0x%02X) = %d", index, reg.index_start, value)
+        await self.send(Packet(DeviceId.PC, target, Command.WRITE_ACK_NO_REPLY, reg.index_start, payload))
+
     async def _read_callback(self, _: BleakGATTCharacteristic, data: bytearray) -> None:
         if list(data[:2]) == Packet.MAGIC:
             self.receive_buffer = data

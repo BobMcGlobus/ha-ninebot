@@ -3,7 +3,7 @@
     "flow_title": "{name}",
     "step": {
       "bluetooth_confirm": {
-        "description": "Möchtest du {name} einrichten?\n\nDrücke bei Aufforderung einmal den Power-Knopf am Roller, um das Pairing zu bestätigen."
+        "description": "Möchtest du {name} einrichten?\n\nNach der Einrichtung beim ersten Abruf einmal den Power-Knopf am Roller drücken, wenn danach gefragt wird, um das Pairing zu bestätigen."
       },
       "user": {
         "description": "Wähle den einzurichtenden Ninebot-Roller aus.",
@@ -17,6 +17,19 @@
       "already_configured": "Dieser Roller ist bereits eingerichtet.",
       "already_in_progress": "Die Einrichtung läuft bereits.",
       "not_supported": "Dieses Gerät wird nicht unterstützt."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Ninebot-Optionen",
+        "data": {
+          "poll_interval": "Abrufintervall (Sekunden)"
+        },
+        "data_description": {
+          "poll_interval": "Wie oft der Roller (wenn wach) verbunden und ausgelesen wird. Kleiner = reaktionsschneller, aber mehr Bluetooth-Last und Akkuverbrauch."
+        }
+      }
     }
   }
 }

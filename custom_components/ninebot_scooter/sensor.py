@@ -1,107 +1,104 @@
-"""Support for Ninebot scooter sensors."""
+"""Ninebot scooter sensors, driven by the register map."""
 from __future__ import annotations
 
-from homeassistant import config_entries
-from homeassistant.components.bluetooth.passive_update_processor import (
-    PassiveBluetoothDataProcessor,
-    PassiveBluetoothDataUpdate,
-    PassiveBluetoothProcessorCoordinator,
-    PassiveBluetoothProcessorEntity,
-)
+from dataclasses import dataclass
+
 from homeassistant.components.sensor import (
     SensorDeviceClass,
     SensorEntity,
     SensorEntityDescription,
+    SensorStateClass,
 )
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.sensor import sensor_device_info_to_hass_device_info
 
 from .const import DOMAIN
-from .device import device_key_to_bluetooth_entity_key
-from .ninebot_ble import SensorUpdate
+from .coordinator import NinebotCoordinator
+from .entity import NinebotEntity
+from .ninebot_ble import BmsIdx, CtrlIdx, get_register_desc, iter_register
+
+# Registers exposed as writable controls (switch/select/number) instead of sensors.
+_CONTROL_KEYS: set[str] = {
+    str(CtrlIdx.NB_CTL_WORKMODE),
+    str(CtrlIdx.NB_CTL_KERS),
+    str(CtrlIdx.NB_CTL_CRUISE),
+    str(CtrlIdx.NB_CTL_TAIL_LIGHT),
+}
+
+# Monotonic totals -> total_increasing for long-term statistics.
+_TOTAL_KEYS: set[str] = {
+    str(CtrlIdx.NB_INF_RID_MIL),
+    str(CtrlIdx.NB_INF_RUN_TIM),
+    str(CtrlIdx.NB_INF_RID_TIM),
+}
 
 
-def sensor_update_to_bluetooth_data_update(
-    sensor_update: SensorUpdate,
-) -> PassiveBluetoothDataUpdate:
-    """Convert a sensor update to a bluetooth data update."""
-    return PassiveBluetoothDataUpdate(
-        devices={
-            device_id: sensor_device_info_to_hass_device_info(device_info)
-            for device_id, device_info in sensor_update.devices.items()
-        },
-        entity_descriptions={
-            device_key_to_bluetooth_entity_key(device_key): SensorEntityDescription(
-                key=str(device_key),
-                device_class=SensorDeviceClass(desc.device_class)
-                if desc.device_class is not None
-                else None,
-                native_unit_of_measurement=desc.native_unit_of_measurement,
+@dataclass(frozen=True, kw_only=True)
+class NinebotSensorEntityDescription(SensorEntityDescription):
+    """Sensor description carrying the register key to read from coordinator data."""
+
+    reg_key: str
+
+
+def _build_descriptions() -> list[NinebotSensorEntityDescription]:
+    descriptions: list[NinebotSensorEntityDescription] = []
+    for idx in iter_register(CtrlIdx, BmsIdx):
+        key = str(idx)
+        if key in _CONTROL_KEYS:
+            continue
+        reg = get_register_desc(idx)
+
+        device_class = (
+            SensorDeviceClass(str(reg.device_class)) if reg.device_class is not None else None
+        )
+        unit = str(reg.unit) if reg.unit is not None else None
+
+        if key in _TOTAL_KEYS:
+            state_class: SensorStateClass | None = SensorStateClass.TOTAL_INCREASING
+        elif unit is not None:
+            state_class = SensorStateClass.MEASUREMENT
+        else:
+            state_class = None
+
+        descriptions.append(
+            NinebotSensorEntityDescription(
+                key=key,
+                reg_key=key,
+                name=key,  # register enum value is a human-readable label
+                device_class=device_class,
+                native_unit_of_measurement=unit,
+                state_class=state_class,
             )
-            for device_key, desc in sensor_update.entity_descriptions.items()
-        },
-        entity_data={
-            device_key_to_bluetooth_entity_key(device_key): sensor_values.native_value
-            for device_key, sensor_values in sensor_update.entity_values.items()
-        },
-        entity_names={
-            device_key_to_bluetooth_entity_key(device_key): sensor_values.name
-            for device_key, sensor_values in sensor_update.entity_values.items()
-        },
-    )
+        )
+    return descriptions
 
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: config_entries.ConfigEntry,
+    entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the Ninebot sensors."""
-    coordinator: PassiveBluetoothProcessorCoordinator = hass.data[DOMAIN][
-        entry.entry_id
-    ]
-    processor = PassiveBluetoothDataProcessor(sensor_update_to_bluetooth_data_update)
-    entry.async_on_unload(
-        processor.async_add_entities_listener(
-            NinebotBluetoothSensorEntity, async_add_entities
-        )
-    )
-    entry.async_on_unload(
-        coordinator.async_register_processor(processor, SensorEntityDescription)
+    coordinator: NinebotCoordinator = hass.data[DOMAIN][entry.entry_id]
+    async_add_entities(
+        NinebotSensor(coordinator, description) for description in _build_descriptions()
     )
 
 
-class NinebotBluetoothSensorEntity(
-    PassiveBluetoothProcessorEntity,
-    SensorEntity,
-):
-    """Representation of a Ninebot sensor.
+class NinebotSensor(NinebotEntity, SensorEntity):
+    """A single register exposed as a sensor."""
 
-    The generic base class is left unsubscripted on purpose: the number of type
-    parameters on ``PassiveBluetoothDataProcessor`` has changed across Home
-    Assistant versions (one arg on older cores, ``[_T, _DataT]`` on newer ones),
-    and subscripting it in the class bases raises a ``TypeError`` at import time
-    on the mismatched version. The subscription is purely for static typing and
-    has no runtime effect, so we omit it to stay compatible with all cores.
-    """
+    entity_description: NinebotSensorEntityDescription
+
+    def __init__(
+        self, coordinator: NinebotCoordinator, description: NinebotSensorEntityDescription
+    ) -> None:
+        super().__init__(coordinator)
+        self.entity_description = description
+        self._attr_unique_id = f"{coordinator.address}_{description.key}"
 
     @property
-    def native_value(self) -> str | int | None:
-        """Return the native value."""
-        return self.processor.entity_data.get(self.entity_key)
-
-    @property
-    def available(self) -> bool:
-        """Return True if entity is available.
-
-        These are sleepy devices that stop broadcasting when not in use, so once
-        we have seen the device we always report available and rely on
-        ``assumed_state`` to signal that the values may be stale.
-        """
-        return True
-
-    @property
-    def assumed_state(self) -> bool:
-        """Return True if the device is no longer broadcasting."""
-        return not self.processor.available
+    def native_value(self) -> str | int | float | None:
+        """Return the current register value."""
+        return self.coordinator.data.get(self.entity_description.reg_key)

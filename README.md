@@ -26,9 +26,23 @@ Read-only sensors, polled while the scooter is awake and in range:
   operating mode (Normal/Eco/Sport), KERS level, cruise control, tail light,
   configured speed limits
 
-Controls (lock, lights, mode as writable entities) are **not** implemented yet —
-this release is monitoring only. That's the first thing to build on top of this
-base.
+### Controls (experimental, since v0.2.0)
+
+Writable entities:
+
+- **Ride mode** (select): Normal / Eco / Sport
+- **Recuperation / KERS** (select): Off / Medium / Strong
+- **Cruise control** (switch)
+- **Tail light** (switch)
+
+> ⚠️ **Writes are experimental.** The write frame is community-derived and not
+> yet fully verified across firmwares — treat the controls as best-effort and
+> check that the value actually changes. Lock/unlock and speed-limit controls are
+> intentionally **not** shipped yet: a wrong speed-limit write is dangerous, so
+> they follow once the write path is confirmed on real hardware.
+
+The **polling interval** (default 30 s) is configurable under the integration's
+**Configure** button.
 
 ## Requirements
 
