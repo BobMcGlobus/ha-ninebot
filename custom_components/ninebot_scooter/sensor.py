@@ -73,10 +73,18 @@ async def async_setup_entry(
 
 
 class NinebotBluetoothSensorEntity(
-    PassiveBluetoothProcessorEntity[PassiveBluetoothDataProcessor[str | int | None]],
+    PassiveBluetoothProcessorEntity,
     SensorEntity,
 ):
-    """Representation of a Ninebot sensor."""
+    """Representation of a Ninebot sensor.
+
+    The generic base class is left unsubscripted on purpose: the number of type
+    parameters on ``PassiveBluetoothDataProcessor`` has changed across Home
+    Assistant versions (one arg on older cores, ``[_T, _DataT]`` on newer ones),
+    and subscripting it in the class bases raises a ``TypeError`` at import time
+    on the mismatched version. The subscription is purely for static typing and
+    has no runtime effect, so we omit it to stay compatible with all cores.
+    """
 
     @property
     def native_value(self) -> str | int | None:
