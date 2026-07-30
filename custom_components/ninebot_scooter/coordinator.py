@@ -166,6 +166,32 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 if isinstance(val, enum.Enum):
                     val = val.name
                 data[str(idx)] = val
+
+            # The BMS reports a placeholder 100% for a moment after the scooter
+            # wakes up, before it has measured the real state of charge. We poll
+            # right when it wakes (advertisement-triggered), so re-read the charge
+            # once after a short delay and prefer a non-placeholder value.
+            soc_key = str(BmsIdx.BAT_REMAINING_CAP_PERCENT)
+            if data.get(soc_key) == 100:
+                await asyncio.sleep(2)
+                for _ in range(3):
+                    try:
+                        retry = await client.read_reg(BmsIdx.BAT_REMAINING_CAP_PERCENT)
+                    except Exception as err:  # noqa: BLE001
+                        _LOGGER.debug("Battery re-read failed: %s", err)
+                        break
+                    if retry != 100:
+                        _LOGGER.debug("Battery placeholder 100%% replaced by %s%%", retry)
+                        data[soc_key] = retry
+                        # Remaining capacity in mAh settles at the same time.
+                        try:
+                            data[str(BmsIdx.BAT_REMAINING_CAP)] = await client.read_reg(
+                                BmsIdx.BAT_REMAINING_CAP
+                            )
+                        except Exception:  # noqa: BLE001
+                            pass
+                        break
+                    await asyncio.sleep(2)
             return data
 
         try:

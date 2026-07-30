@@ -32,6 +32,8 @@ SWITCHES: tuple[NinebotSwitchEntityDescription, ...] = (
         icon="mdi:cruise-control",
         register=CtrlIdx.NB_CTL_CRUISE,
         entity_category=EntityCategory.CONFIG,
+        # Writes are experimental/unverified - opt in per entity.
+        entity_registry_enabled_default=False,
     ),
     NinebotSwitchEntityDescription(
         key="tail_light",
@@ -39,6 +41,7 @@ SWITCHES: tuple[NinebotSwitchEntityDescription, ...] = (
         icon="mdi:car-light-high",
         register=CtrlIdx.NB_CTL_TAIL_LIGHT,
         entity_category=EntityCategory.CONFIG,
+        entity_registry_enabled_default=False,
     ),
 )
 

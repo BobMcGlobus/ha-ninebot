@@ -37,6 +37,30 @@ _TOTAL_KEYS: set[str] = {
     str(CtrlIdx.NB_INF_RID_TIM),
 }
 
+# --- Entity presentation ----------------------------------------------------
+# A scooter exposes ~45 registers. Only a handful are interesting day to day, so
+# keep those primary, put a few useful ones under Diagnostics, and ship the long
+# tail disabled by default (users can enable any of them per entity).
+
+# Primary sensors, shown at the top of the device page.
+_PRIMARY_KEYS: tuple[str, ...] = (
+    str(BmsIdx.BAT_REMAINING_CAP_PERCENT),  # battery %
+    str(CtrlIdx.NB_INF_RID_MIL),  # total mileage / odometer
+    str(CtrlIdx.NB_INF_ACTUAL_MIL),  # actual remaining mileage
+)
+
+# Diagnostic, but visible by default.
+_DIAGNOSTIC_ENABLED_KEYS: frozenset[str] = frozenset(
+    {
+        str(BmsIdx.BAT_HEALTHY),  # battery health
+        str(CtrlIdx.NB_INF_RUN_TIM),  # total operation time
+        str(CtrlIdx.NB_INF_RID_TIM),  # total riding time
+        str(CtrlIdx.NB_INF_SN),  # scooter serial number
+        str(CtrlIdx.NB_FW_VER),  # controller firmware
+        str(CtrlIdx.NB_INF_VER_BLE),  # BLE firmware
+    }
+)
+
 
 @dataclass(frozen=True, kw_only=True)
 class NinebotSensorEntityDescription(SensorEntityDescription):
@@ -65,6 +89,7 @@ def _build_descriptions() -> list[NinebotSensorEntityDescription]:
         else:
             state_class = None
 
+        is_primary = key in _PRIMARY_KEYS
         descriptions.append(
             NinebotSensorEntityDescription(
                 key=key,
@@ -73,8 +98,16 @@ def _build_descriptions() -> list[NinebotSensorEntityDescription]:
                 device_class=device_class,
                 native_unit_of_measurement=unit,
                 state_class=state_class,
+                entity_category=None if is_primary else EntityCategory.DIAGNOSTIC,
+                entity_registry_enabled_default=(
+                    is_primary or key in _DIAGNOSTIC_ENABLED_KEYS
+                ),
             )
         )
+    # Keep the primary sensors in a predictable order at the top.
+    descriptions.sort(
+        key=lambda d: _PRIMARY_KEYS.index(d.key) if d.key in _PRIMARY_KEYS else len(_PRIMARY_KEYS)
+    )
     return descriptions
 
 

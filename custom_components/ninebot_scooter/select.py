@@ -38,6 +38,8 @@ SELECTS: tuple[NinebotSelectEntityDescription, ...] = (
         options=list(_MODE_MAP),
         to_value=_MODE_MAP,
         entity_category=EntityCategory.CONFIG,
+        # Writes are experimental/unverified - opt in per entity.
+        entity_registry_enabled_default=False,
     ),
     NinebotSelectEntityDescription(
         key="kers_level",
@@ -47,6 +49,7 @@ SELECTS: tuple[NinebotSelectEntityDescription, ...] = (
         options=list(_KERS_MAP),
         to_value=_KERS_MAP,
         entity_category=EntityCategory.CONFIG,
+        entity_registry_enabled_default=False,
     ),
 )
 
