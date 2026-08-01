@@ -214,6 +214,14 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                             data[str(idx)] = retry
                             break
 
+            if not data:
+                # Nothing came back at all: the session is not usable. Fail the
+                # poll instead of reporting success with an empty result, which
+                # would advance "Last updated" and make stale values look fresh.
+                raise UpdateFailed(
+                    f"Connected but no register could be read ({len(failed)} attempted)"
+                )
+
             if failed:
                 # Surface partial polls: a silently skipped register otherwise looks
                 # identical to an unchanged value, because entities fall back to the

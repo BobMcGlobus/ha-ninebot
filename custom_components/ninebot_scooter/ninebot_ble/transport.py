@@ -158,14 +158,6 @@ class NinebotClient:
                     "Pairing not confirmed - press the scooter's power button during setup"
                 )
 
-        # Ensure the encrypted session key includes the app data even when the
-        # pairing loop above was skipped/short-circuited (e.g. the scooter reports
-        # it is already paired and PING returns data_index == 1, or pairing
-        # completes via a PAIR response). Without this, reads on a reconnect are
-        # decrypted with the wrong key and fail.
-        if self.crypto.app_data is None:
-            self.crypto.set_app_data(self.app_key)
-
         # Final PAIR handshake. Best-effort: some firmwares don't acknowledge a
         # redundant PAIR when the scooter is already registered from a previous
         # session, so a missing response here must not fail the connection - the
@@ -178,7 +170,35 @@ class NinebotClient:
         except TimeoutError:
             _LOGGER.debug("Final PAIR not acknowledged; continuing (likely already paired)")
 
+        # Settle on the session key. Which derivation the scooter expects depends
+        # on its pairing state, and picking wrong fails *silently*: the scooter
+        # simply cannot decrypt our requests and never answers, so every register
+        # read times out. Probe with a cheap read and fall back to the other
+        # derivation rather than guessing.
+        if not await self._session_works():
+            _LOGGER.debug("Session key rejected; retrying with the app-data key")
+            self.crypto.set_app_data(self.app_key)
+            if not await self._session_works():
+                _LOGGER.debug("App-data key rejected too; retrying with the BLE-data key")
+                self.crypto.set_ble_data(received_key)
+                if not await self._session_works():
+                    raise TimeoutError(
+                        "Scooter does not accept our session key - re-pair required "
+                        "(remove and re-add the integration, then press the power button)"
+                    )
+
         _LOGGER.debug("Connected and authenticated successfully!")
+
+    async def _session_works(self) -> bool:
+        """Cheap probe read to verify the encrypted session is understood."""
+        try:
+            await self.request(
+                Packet(DeviceId.PC, DeviceId.ES_CONTROL, Command.READ, 0x1A, [2]),
+                timeout=3,
+            )
+        except TimeoutError:
+            return False
+        return True
 
     async def disconnect(self) -> None:
         if self.client and self.client.is_connected:
