@@ -34,6 +34,32 @@ _LOGGER = logging.getLogger(__name__)
 
 _T = TypeVar("_T")
 
+# The scooter is often only awake for a minute or two, and reading every register
+# takes ~45 round trips - if the session ends early, whatever is read last is
+# lost. Read the registers people actually care about first; the battery lives at
+# the very end of the register tables and was consistently the casualty.
+_PRIORITY_REGISTERS: tuple[CtrlIdx | BmsIdx, ...] = (
+    BmsIdx.BAT_REMAINING_CAP_PERCENT,
+    CtrlIdx.NB_INF_RID_MIL,
+    CtrlIdx.NB_INF_ACTUAL_MIL,
+    BmsIdx.BAT_REMAINING_CAP,
+    BmsIdx.BAT_VOLTAGE_CUR,
+    BmsIdx.BAT_CURRENT_CUR,
+    BmsIdx.BAT_TEMP_CUR1,
+    BmsIdx.BAT_HEALTHY,
+    CtrlIdx.NB_CTL_WORKMODE,
+    CtrlIdx.NB_CTL_KERS,
+    CtrlIdx.NB_INF_PRD_RID_MIL,
+    CtrlIdx.NB_INF_RUN_TIM,
+    CtrlIdx.NB_INF_RID_TIM,
+)
+
+
+def _ordered_registers() -> list[CtrlIdx | BmsIdx]:
+    """All registers, most important first."""
+    rest = [idx for idx in iter_register(CtrlIdx, BmsIdx) if idx not in _PRIORITY_REGISTERS]
+    return [*_PRIORITY_REGISTERS, *rest]
+
 
 class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     """Advertisement-triggered, connect-per-poll coordinator for one scooter.
@@ -157,41 +183,49 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     _LOGGER.debug("Could not read firmware version: %s", err)
 
             data: dict[str, Any] = {}
-            for idx in iter_register(CtrlIdx, BmsIdx):
+            failed: list[str] = []
+            for idx in _ordered_registers():
                 try:
                     val = await client.read_reg(idx)
                 except Exception as err:  # noqa: BLE001 - one bad read must not fail the poll
                     _LOGGER.debug("Failed reading register %s: %s", idx, err)
+                    failed.append(str(idx))
                     continue
                 if isinstance(val, enum.Enum):
                     val = val.name
                 data[str(idx)] = val
 
-            # The BMS reports a placeholder 100% for a moment after the scooter
-            # wakes up, before it has measured the real state of charge. We poll
-            # right when it wakes (advertisement-triggered), so re-read the charge
-            # once after a short delay and prefer a non-placeholder value.
-            soc_key = str(BmsIdx.BAT_REMAINING_CAP_PERCENT)
-            if data.get(soc_key) == 100:
-                await asyncio.sleep(2)
-                for _ in range(3):
-                    try:
-                        retry = await client.read_reg(BmsIdx.BAT_REMAINING_CAP_PERCENT)
-                    except Exception as err:  # noqa: BLE001
-                        _LOGGER.debug("Battery re-read failed: %s", err)
-                        break
-                    if retry != 100:
-                        _LOGGER.debug("Battery placeholder 100%% replaced by %s%%", retry)
-                        data[soc_key] = retry
-                        # Remaining capacity in mAh settles at the same time.
+                # The BMS reports a placeholder 100% for a moment after the scooter
+                # wakes, before it has measured the real charge - and we poll exactly
+                # at wake-up. Re-read straight away (the session is healthiest here)
+                # and prefer a non-placeholder value.
+                if idx is BmsIdx.BAT_REMAINING_CAP_PERCENT and val == 100:
+                    for _ in range(3):
+                        await asyncio.sleep(2)
                         try:
-                            data[str(BmsIdx.BAT_REMAINING_CAP)] = await client.read_reg(
-                                BmsIdx.BAT_REMAINING_CAP
+                            retry = await client.read_reg(BmsIdx.BAT_REMAINING_CAP_PERCENT)
+                        except Exception as err:  # noqa: BLE001
+                            _LOGGER.debug("Battery re-read failed: %s", err)
+                            break
+                        if retry != 100:
+                            _LOGGER.debug(
+                                "Battery placeholder 100%% replaced by %s%%", retry
                             )
-                        except Exception:  # noqa: BLE001
-                            pass
-                        break
-                    await asyncio.sleep(2)
+                            data[str(idx)] = retry
+                            break
+
+            if failed:
+                # Surface partial polls: a silently skipped register otherwise looks
+                # identical to an unchanged value, because entities fall back to the
+                # last known reading.
+                _LOGGER.warning(
+                    "Read %d/%d registers; %d failed: %s",
+                    len(data),
+                    len(data) + len(failed),
+                    len(failed),
+                    ", ".join(failed),
+                )
+
             return data
 
         try:
