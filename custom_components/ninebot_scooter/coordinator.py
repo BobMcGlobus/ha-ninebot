@@ -90,6 +90,9 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Wall-clock time of the last successful poll (for the "last updated" sensor).
         self.last_update_time: datetime | None = None
 
+        # GATT layout seen on the last connection attempt (for diagnostics).
+        self.gatt_services: dict[str, list[str]] = {}
+
         # Cached device metadata (read once, on the first successful poll).
         self.serial: str | None = None
         self.model: str | None = None
@@ -158,6 +161,10 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 await client.connect(ble_device)
                 return await action(client)
             finally:
+                # Keep the GATT layout even when the connection failed - it is the
+                # most useful clue when someone reports an unsupported model.
+                if client.gatt_services:
+                    self.gatt_services = client.gatt_services
                 await client.disconnect()
 
     async def _async_update_data(self) -> dict[str, Any]:

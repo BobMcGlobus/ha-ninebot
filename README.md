@@ -44,6 +44,21 @@ Writable entities:
 The **polling interval** (default 30 s) is configurable under the integration's
 **Configure** button.
 
+## Other / newer models
+
+Confirmed working on the **Max G30D**. Other E / MAX / F series scooters using the
+same protocol are likely to work.
+
+Newer models (G2, G3, F2, E3 …) may use a **different, newer BLE protocol** that
+this integration does not speak yet. They are no longer rejected outright: if no
+known scooter is found, the setup dialog lists every nearby Bluetooth device so an
+unsupported model can at least be attempted.
+
+**If your model doesn't work, this is the most useful thing you can send:**
+open the integration, use **Download diagnostics**, and attach the file to an
+issue. It contains what the scooter advertises and which GATT services it exposes
+— that alone shows whether the existing protocol can apply. No coding needed.
+
 ## Requirements
 
 - Home Assistant **2024.12** or newer with the Bluetooth integration set up

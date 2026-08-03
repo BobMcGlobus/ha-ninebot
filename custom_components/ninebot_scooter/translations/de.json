@@ -6,7 +6,7 @@
         "description": "Möchtest du {name} einrichten?\n\nNach der Einrichtung beim ersten Abruf einmal den Power-Knopf am Roller drücken, wenn danach gefragt wird, um das Pairing zu bestätigen."
       },
       "user": {
-        "description": "Wähle den einzurichtenden Ninebot-Roller aus.",
+        "description": "Wähle den einzurichtenden Ninebot-Roller aus.\n{note}",
         "data": {
           "address": "Bluetooth-Gerät"
         }

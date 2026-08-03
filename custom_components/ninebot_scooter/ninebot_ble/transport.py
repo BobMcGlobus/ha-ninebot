@@ -105,6 +105,9 @@ class NinebotClient:
         self.receive_queue: asyncio.Queue[Packet] = asyncio.Queue(100)
         self.receive_buffer = bytearray()
         self.client: BleakClient | None = None
+        # Populated on connect: {service_uuid: [characteristic_uuid, ...]}. Useful
+        # for diagnosing models we don't support yet, which use different UUIDs.
+        self.gatt_services: dict[str, list[str]] = {}
 
     async def connect(self, device: BLEDevice, pair_timeout: float = 45.0) -> None:
         """Connect and handshake the scooter.
@@ -116,6 +119,21 @@ class NinebotClient:
 
         _LOGGER.info("Connecting to %s (%s): ...", device.name, device.address)
         self.client = await establish_connection(BleakClient, device, device.address)
+
+        # Record the GATT layout before touching any characteristic, so that an
+        # unsupported model still reports what it offers instead of only failing.
+        self.gatt_services = {
+            str(service.uuid): [str(char.uuid) for char in service.characteristics]
+            for service in self.client.services
+        }
+        if NORDIC_UART_TX_UUID not in [
+            uuid for uuids in self.gatt_services.values() for uuid in uuids
+        ]:
+            raise TimeoutError(
+                "Scooter does not expose the expected Nordic UART service - this "
+                f"model is probably not supported yet. Services seen: {self.gatt_services}"
+            )
+
         await self.client.start_notify(NORDIC_UART_TX_UUID, self._read_callback)
 
         _LOGGER.debug("Authenticating ...")
@@ -183,8 +201,10 @@ class NinebotClient:
                 self.crypto.set_ble_data(received_key)
                 if not await self._session_works():
                     raise TimeoutError(
-                        "Scooter does not accept our session key - re-pair required "
-                        "(remove and re-add the integration, then press the power button)"
+                        "Scooter never answered an encrypted read. Either it needs "
+                        "re-pairing (remove and re-add the integration, then press "
+                        "the power button), or this model uses a newer protocol "
+                        "that is not supported yet"
                     )
 
         _LOGGER.debug("Connected and authenticated successfully!")

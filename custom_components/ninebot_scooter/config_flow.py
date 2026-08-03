@@ -31,12 +31,26 @@ from .const import (
     MIN_POLL_INTERVAL,
 )
 
-# Ninebot scooters advertise with this manufacturer id.
+# Older Ninebot scooters (E/MAX/F series) advertise with this manufacturer id.
 _NINEBOT_MANUFACTURER_ID = 16974
+
+# Newer models (G2/G3/F2/E3 ...) may advertise differently, so also recognise the
+# usual advertised name prefixes. Anything not matched can still be picked
+# manually - see async_step_user.
+_NAME_PREFIXES = ("nbscooter", "ninebot", "segway", "nb-", "nbs")
 
 
 def _is_ninebot(discovery_info: BluetoothServiceInfoBleak) -> bool:
+    """Known-good match: the manufacturer id used by supported models."""
     return _NINEBOT_MANUFACTURER_ID in discovery_info.manufacturer_data
+
+
+def _looks_like_ninebot(discovery_info: BluetoothServiceInfoBleak) -> bool:
+    """Looser match, including models we don't formally support yet."""
+    if _is_ninebot(discovery_info):
+        return True
+    name = (discovery_info.name or "").lower()
+    return name.startswith(_NAME_PREFIXES)
 
 
 class NinebotConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -55,7 +69,7 @@ class NinebotConfigFlow(ConfigFlow, domain=DOMAIN):
         """Handle the bluetooth discovery step."""
         await self.async_set_unique_id(discovery_info.address)
         self._abort_if_unique_id_configured()
-        if not _is_ninebot(discovery_info):
+        if not _looks_like_ninebot(discovery_info):
             return self.async_abort(reason="not_supported")
         self._discovery_info = discovery_info
         return await self.async_step_bluetooth_confirm()
@@ -88,14 +102,20 @@ class NinebotConfigFlow(ConfigFlow, domain=DOMAIN):
             )
 
         current_addresses = self._async_current_ids()
-        for discovery_info in async_discovered_service_info(self.hass, False):
-            address = discovery_info.address
-            if address in current_addresses or address in self._discovered_devices:
-                continue
-            if _is_ninebot(discovery_info):
-                self._discovered_devices[address] = (
-                    discovery_info.name or discovery_info.address
-                )
+        candidates = [
+            info
+            for info in async_discovered_service_info(self.hass, False)
+            if info.address not in current_addresses
+        ]
+
+        # Prefer devices we recognise; if none look like a scooter, offer every
+        # nearby device rather than dead-ending. Models we don't formally support
+        # yet (e.g. newer G-series) can then at least be attempted, and the
+        # resulting logs/diagnostics tell us what they speak.
+        recognised = [info for info in candidates if _looks_like_ninebot(info)]
+        showing_all = not recognised
+        for info in recognised or candidates:
+            self._discovered_devices[info.address] = info.name or info.address
 
         if not self._discovered_devices:
             return self.async_abort(reason="no_devices_found")
@@ -105,6 +125,15 @@ class NinebotConfigFlow(ConfigFlow, domain=DOMAIN):
             data_schema=vol.Schema(
                 {vol.Required(CONF_ADDRESS): vol.In(self._discovered_devices)}
             ),
+            description_placeholders={
+                "note": (
+                    "No known Ninebot scooter was found nearby, so all Bluetooth "
+                    "devices are listed. Picking an unsupported model may not work "
+                    "- please share the diagnostics if it fails."
+                )
+                if showing_all
+                else ""
+            },
         )
 
     @staticmethod
