@@ -44,6 +44,24 @@ Writable entities:
 The **polling interval** (default 30 s) is configurable under the integration's
 **Configure** button.
 
+### Max speed override (disabled by default)
+
+`number.<scooter>_max_speed_override` writes the scooter's normal-mode speed
+limit. The change lasts **until the scooter is powered off**, like the various
+"unlock" apps.
+
+> ⚠️ **Read before enabling.** Raising the limit beyond the speed your model is
+> homologated for (20 km/h for a German G30D) voids its type approval — and with
+> it your insurance cover — on public roads. In Germany riding uninsured is a
+> criminal offence, not a fine. The scooter's brakes, frame and lights were
+> certified for the original speed. Whether you may use this on private land, on
+> public roads, or at all, is your responsibility and depends on where you are.
+
+Safeguards: the entity is disabled by default, values are clamped to
+6–30 km/h, and the integration refuses to write at all if it cannot make sense of
+the register the scooter reports (encoding differs between firmwares). Every write
+is read back and an error is raised if the scooter did not accept it.
+
 ## Other / newer models
 
 Confirmed working on the **Max G30D**. Other E / MAX / F series scooters using the

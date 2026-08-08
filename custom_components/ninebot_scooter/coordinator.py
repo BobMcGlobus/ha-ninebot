@@ -276,6 +276,31 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return str(err)
         return None
 
+    async def async_write_and_verify(
+        self, index: CtrlIdx | BmsIdx, raw_value: int
+    ) -> Any:
+        """Write a register and read it straight back.
+
+        Returns the value read back (scaled, as read_reg returns it) so the caller
+        can confirm the scooter actually accepted the change. Only the touched
+        register is re-read - a full refresh would be ~45 round trips.
+        """
+
+        async def _write_read(client: NinebotClient) -> Any:
+            await client.write_reg(index, raw_value)
+            await asyncio.sleep(0.5)
+            return await client.read_reg(index)
+
+        result = await self._with_client(_write_read)
+
+        if self.data is not None:
+            updated = dict(self.data)
+            updated[str(index)] = (
+                result.name if isinstance(result, enum.Enum) else result
+            )
+            self.async_set_updated_data(updated)
+        return result
+
     async def async_write_register(self, index: CtrlIdx | BmsIdx, raw_value: int) -> None:
         """Write a raw register value, then refresh so state reflects the device."""
 

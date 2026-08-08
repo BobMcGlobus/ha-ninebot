@@ -6,14 +6,23 @@
       "manufacturer_id": 16974
     }
   ],
-  "codeowners": ["@BobMcGlobus"],
+  "codeowners": [
+    "@BobMcGlobus"
+  ],
   "config_flow": true,
-  "dependencies": ["bluetooth_adapters"],
+  "dependencies": [
+    "bluetooth_adapters"
+  ],
   "documentation": "https://github.com/BobMcGlobus/ha-ninebot",
   "integration_type": "device",
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/BobMcGlobus/ha-ninebot/issues",
-  "loggers": ["custom_components.ninebot_scooter"],
-  "requirements": ["sensor-state-data", "bluetooth-sensor-state-data"],
-  "version": "0.5.1"
+  "loggers": [
+    "custom_components.ninebot_scooter"
+  ],
+  "requirements": [
+    "sensor-state-data",
+    "bluetooth-sensor-state-data"
+  ],
+  "version": "0.6.0"
 }
