@@ -26,29 +26,34 @@ Read-only sensors, polled while the scooter is awake and in range:
   operating mode (Normal/Eco/Sport), KERS level, cruise control, tail light,
   configured speed limits
 
-### Controls (experimental, since v0.2.0)
+### Controls
 
-Writable entities:
+Writing has been confirmed on a G30D (the scooter acknowledges the write and
+reports the new value back). Every control reads the register back after writing
+and raises an error if the scooter did not accept the change.
 
+- **Lock** — the scooter's built-in lock
 - **Ride mode** (select): Normal / Eco / Sport
 - **Recuperation / KERS** (select): Off / Medium / Strong
 - **Cruise control** (switch)
 - **Tail light** (switch)
 
-> ⚠️ **Writes are experimental.** The write frame is community-derived and not
-> yet fully verified across firmwares — treat the controls as best-effort and
-> check that the value actually changes. Lock/unlock and speed-limit controls are
-> intentionally **not** shipped yet: a wrong speed-limit write is dangerous, so
-> they follow once the write path is confirmed on real hardware.
+Locking flips a single bit of a packed status word, leaving the other flags in it
+untouched. Some firmwares may only permit this from the official app — you'll get
+an explicit error rather than a silent no-op.
 
 The **polling interval** (default 30 s) is configurable under the integration's
 **Configure** button.
 
-### Max speed override (disabled by default)
+### Normal mode speed limit (disabled by default)
 
-`number.<scooter>_max_speed_override` writes the scooter's normal-mode speed
-limit. The change lasts **until the scooter is powered off**, like the various
-"unlock" apps.
+`number.<scooter>_normal_mode_speed_limit` writes the scooter's normal-mode speed
+limit register.
+
+> **This does not unlock a higher top speed.** On a G30D the scooter accepts the
+> write and reports the new value, but the speed actually ridden does not change —
+> the model's cap is enforced elsewhere. The register is exposed for
+> experimentation, not as a working "unlock".
 
 > ⚠️ **Read before enabling.** Raising the limit beyond the speed your model is
 > homologated for (20 km/h for a German G30D) voids its type approval — and with

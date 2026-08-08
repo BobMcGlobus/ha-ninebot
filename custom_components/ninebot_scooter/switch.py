@@ -8,6 +8,7 @@ from homeassistant.components.switch import SwitchEntity, SwitchEntityDescriptio
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
@@ -32,8 +33,6 @@ SWITCHES: tuple[NinebotSwitchEntityDescription, ...] = (
         icon="mdi:cruise-control",
         register=CtrlIdx.NB_CTL_CRUISE,
         entity_category=EntityCategory.CONFIG,
-        # Writes are experimental/unverified - opt in per entity.
-        entity_registry_enabled_default=False,
     ),
     NinebotSwitchEntityDescription(
         key="tail_light",
@@ -41,7 +40,6 @@ SWITCHES: tuple[NinebotSwitchEntityDescription, ...] = (
         icon="mdi:car-light-high",
         register=CtrlIdx.NB_CTL_TAIL_LIGHT,
         entity_category=EntityCategory.CONFIG,
-        entity_registry_enabled_default=False,
     ),
 )
 
@@ -78,12 +76,19 @@ class NinebotSwitch(NinebotEntity, SwitchEntity):
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the control on."""
-        await self.coordinator.async_write_register(
-            self.entity_description.register, self.entity_description.on_value
-        )
+        await self._async_write(self.entity_description.on_value)
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn the control off."""
-        await self.coordinator.async_write_register(
-            self.entity_description.register, self.entity_description.off_value
+        await self._async_write(self.entity_description.off_value)
+
+    async def _async_write(self, raw: int) -> None:
+        readback = await self.coordinator.async_write_and_verify(
+            self.entity_description.register, raw
         )
+        want_on = raw != self.entity_description.off_value
+        got_on = readback is not None and int(readback) != self.entity_description.off_value
+        if got_on is not want_on:
+            raise HomeAssistantError(
+                f"Scooter did not accept the change (it now reports {readback})"
+            )

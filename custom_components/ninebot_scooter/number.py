@@ -1,11 +1,11 @@
-"""Temporary top-speed override for a Ninebot scooter.
+"""Writable speed limit for a Ninebot scooter.
 
-The scooter stores its normal-mode speed limit in a control register. Writing to
-it raises the cap until the scooter is powered off, which is what the various
-"unlock" apps do. This is exposed as an opt-in entity, disabled by default:
-raising the limit beyond the model's homologated speed voids the type approval
-(and with it the insurance cover) in most countries, so it is not something to
-enable by accident.
+Exposes the scooter's normal-mode speed limit register. Note that on a G30D this
+register was accepted (the scooter acknowledges the write and reports the new
+value) but did **not** change the speed actually ridden - the model's top speed is
+enforced elsewhere. It is kept as an opt-in entity, disabled by default: it writes
+to a speed limiter, and raising a limit beyond the speed a model is homologated
+for voids its type approval and insurance cover in most countries.
 """
 from __future__ import annotations
 
@@ -27,18 +27,14 @@ _LOGGER = logging.getLogger(__name__)
 
 _REGISTER = CtrlIdx.NB_CTL_NOMALSPEED
 
-# How the register encodes km/h differs between firmwares: some report tenths
-# (20.0 km/h reads as 20.0 after scaling), others thousandths (the same limit
-# reads as 2000.0). Rather than assume, derive the factor from the value the
-# scooter currently reports, and refuse to write if it matches neither - writing a
-# misinterpreted value to a speed limiter is exactly what must not happen.
-_ENCODINGS: tuple[tuple[float, float, int], ...] = (
-    # (plausible low, plausible high, raw value per km/h)
-    # read_reg already divides the raw register by 10, so a firmware storing
-    # tenths reads as ~20, one storing thousandths reads as ~2000.
-    (5.0, 35.0, 10),
-    (500.0, 3500.0, 1000),
-)
+# Raw units per km/h for this register (confirmed on a G30D: a 20 km/h limit is
+# stored as 20000). The register description scales reads by the same factor, so
+# values here are plain km/h.
+_RAW_PER_KMH = 1000
+
+# Refuse to write if the scooter reports something we cannot read as a speed -
+# writing a misinterpreted value to a speed limiter is what must not happen.
+_PLAUSIBLE = (5.0, 35.0)
 
 
 async def async_setup_entry(
@@ -54,7 +50,7 @@ async def async_setup_entry(
 class NinebotMaxSpeedNumber(NinebotEntity, NumberEntity):
     """Normal-mode speed limit, writable."""
 
-    _attr_name = "Max speed override"
+    _attr_name = "Normal mode speed limit"
     _attr_icon = "mdi:speedometer"
     _attr_native_unit_of_measurement = UnitOfSpeed.KILOMETERS_PER_HOUR
     _attr_native_min_value = MIN_SPEED_LIMIT
@@ -70,52 +66,32 @@ class NinebotMaxSpeedNumber(NinebotEntity, NumberEntity):
         self._attr_unique_id = f"{coordinator.address}_max_speed"
 
     @property
-    def _raw_reading(self) -> float | None:
-        value = (self.coordinator.data or {}).get(str(_REGISTER))
-        return None if value is None else float(value)
-
-    @staticmethod
-    def _encoding_for(reading: float) -> tuple[float, int] | None:
-        """Return (km/h, factor) for a reading, or None if it makes no sense."""
-        for low, high, factor in _ENCODINGS:
-            if low <= reading <= high:
-                return reading / (factor / 10), factor
-        return None
-
-    @property
     def native_value(self) -> float | None:
-        """Current speed limit in km/h."""
-        reading = self._raw_reading
-        if reading is None:
-            return None
-        resolved = self._encoding_for(reading)
-        return None if resolved is None else round(resolved[0], 1)
+        """Current normal-mode speed limit in km/h."""
+        value = (self.coordinator.data or {}).get(str(_REGISTER))
+        return None if value is None else round(float(value), 1)
 
     async def async_set_native_value(self, value: float) -> None:
-        """Raise or lower the speed limit until the scooter is powered off."""
-        reading = self._raw_reading
-        if reading is None:
+        """Change the normal-mode speed limit."""
+        current = self.native_value
+        if current is None:
             raise HomeAssistantError(
                 "The scooter's speed limit has not been read yet - wake it and "
                 "wait for an update before changing the limit"
             )
-
-        resolved = self._encoding_for(reading)
-        if resolved is None:
+        if not _PLAUSIBLE[0] <= current <= _PLAUSIBLE[1]:
             raise HomeAssistantError(
                 f"Cannot interpret this scooter's speed limit register (reads "
-                f"{reading}). Refusing to write to it. Please report this value "
-                "so the model can be supported properly."
+                f"{current} km/h). Refusing to write to it. Please report this "
+                "value so the model can be supported properly."
             )
-        _, factor = resolved
 
-        raw = int(round(value * factor))
-        _LOGGER.debug("Setting speed limit to %s km/h (raw %d)", value, raw)
+        raw = int(round(value * _RAW_PER_KMH))
+        _LOGGER.debug("Setting normal mode speed limit to %s km/h (raw %d)", value, raw)
         readback = await self.coordinator.async_write_and_verify(_REGISTER, raw)
 
-        confirmed = self._encoding_for(float(readback)) if readback is not None else None
-        if confirmed is None or abs(confirmed[0] - value) > 0.6:
+        if readback is None or abs(float(readback) - value) > 0.6:
             raise HomeAssistantError(
                 f"Scooter did not accept the new speed limit (it now reports "
-                f"{readback}). The limit was not changed as requested."
+                f"{readback} km/h). The limit was not changed as requested."
             )

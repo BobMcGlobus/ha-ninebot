@@ -283,22 +283,30 @@ class NinebotClient:
                 _LOGGER.debug("Retrying request ...")
         raise TimeoutError(f"Did not get a response on {request}")
 
+    async def read_reg_bytes(self, index: CtrlIdx | BmsIdx) -> list[int]:
+        """Read a register's raw bytes, before any unpacking or scaling.
+
+        Needed to modify single bits of a packed status word without disturbing
+        the other flags in it.
+        """
+        target = DeviceId.ES_CONTROL if isinstance(index, CtrlIdx) else DeviceId.ES_BATT
+        reg = get_register_desc(index)
+
+        data: list[int] = []
+        for i in range(reg.index_len):
+            resp = await self.request(
+                Packet(DeviceId.PC, target, Command.READ, reg.index_start + i, [reg.read_len])
+            )
+            data.extend(resp.data_segment)
+        return data
+
     async def read_reg(self, index: CtrlIdx | BmsIdx) -> Any:
         """Read scooter memory register.
 
         Just tell which one and this function will do the rest.
         """
-        if isinstance(index, CtrlIdx):
-            target = DeviceId.ES_CONTROL
-        else:
-            target = DeviceId.ES_BATT
-
         reg = get_register_desc(index)
-
-        data: list[int] = []
-        for i in range(reg.index_len):
-            resp = await self.request(Packet(DeviceId.PC, target, Command.READ, reg.index_start + i, [reg.read_len]))
-            data.extend(resp.data_segment)
+        data = await self.read_reg_bytes(index)
 
         unpacked = reg.unpacker(data)
         if reg.scaler:

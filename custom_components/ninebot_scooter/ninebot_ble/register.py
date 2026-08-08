@@ -260,8 +260,11 @@ _CTRL_TABLE: dict[CtrlIdx, RegDesc[Any]] = {
     CtrlIdx.NB_CTL_LIMIT_SPD: RegDesc(
         0x72, 1, 2, _unpack_LES16, scaler=lambda x: x / 10, unit=Units.SPEED_KILOMETERS_PER_HOUR
     ),
+    # Unlike the neighbouring speed registers (tenths of km/h), this one stores
+    # thousandths: a G30D limited to 20 km/h reads 20000 here, which the original
+    # /10 scaling reported as an absurd "2000 km/h".
     CtrlIdx.NB_CTL_NOMALSPEED: RegDesc(
-        0x73, 1, 2, _unpack_LES16, scaler=lambda x: x / 10, unit=Units.SPEED_KILOMETERS_PER_HOUR
+        0x73, 1, 2, _unpack_LES16, scaler=lambda x: x / 1000, unit=Units.SPEED_KILOMETERS_PER_HOUR
     ),
     CtrlIdx.NB_CTL_LITSPEED: RegDesc(
         0x74, 1, 2, _unpack_LES16, scaler=lambda x: x / 10, unit=Units.SPEED_KILOMETERS_PER_HOUR

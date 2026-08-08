@@ -301,6 +301,36 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.async_set_updated_data(updated)
         return result
 
+    async def async_set_status_bit(
+        self, index: CtrlIdx | BmsIdx, bit: int, value: bool
+    ) -> bool:
+        """Flip a single bit of a packed status word, preserving the others.
+
+        Returns whether the scooter reports the bit as requested afterwards.
+        """
+
+        async def _rmw(client: NinebotClient) -> bool:
+            raw = await client.read_reg_bytes(index)
+            word = (raw[1] << 8) | raw[0]
+            updated = word | (1 << bit) if value else word & ~(1 << bit)
+            _LOGGER.debug(
+                "Status word %s: 0x%04X -> 0x%04X (bit %d = %s)",
+                index,
+                word,
+                updated,
+                bit,
+                value,
+            )
+            if updated != word:
+                await client.write_reg(index, updated)
+                await asyncio.sleep(0.5)
+            check = await client.read_reg_bytes(index)
+            return bool(((check[1] << 8) | check[0]) & (1 << bit)) is value
+
+        ok = await self._with_client(_rmw)
+        await self.async_request_refresh()
+        return ok
+
     async def async_write_register(self, index: CtrlIdx | BmsIdx, raw_value: int) -> None:
         """Write a raw register value, then refresh so state reflects the device."""
 

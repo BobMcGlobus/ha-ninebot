@@ -7,6 +7,7 @@ from homeassistant.components.select import SelectEntity, SelectEntityDescriptio
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
@@ -38,8 +39,6 @@ SELECTS: tuple[NinebotSelectEntityDescription, ...] = (
         options=list(_MODE_MAP),
         to_value=_MODE_MAP,
         entity_category=EntityCategory.CONFIG,
-        # Writes are experimental/unverified - opt in per entity.
-        entity_registry_enabled_default=False,
     ),
     NinebotSelectEntityDescription(
         key="kers_level",
@@ -49,7 +48,6 @@ SELECTS: tuple[NinebotSelectEntityDescription, ...] = (
         options=list(_KERS_MAP),
         to_value=_KERS_MAP,
         entity_category=EntityCategory.CONFIG,
-        entity_registry_enabled_default=False,
     ),
 )
 
@@ -91,4 +89,11 @@ class NinebotSelect(NinebotEntity, SelectEntity):
     async def async_select_option(self, option: str) -> None:
         """Change the option."""
         raw = self.entity_description.to_value[option]
-        await self.coordinator.async_write_register(self.entity_description.register, raw)
+        readback = await self.coordinator.async_write_and_verify(
+            self.entity_description.register, raw
+        )
+        # read_reg returns the enum member name for these registers.
+        if str(readback) != option:
+            raise HomeAssistantError(
+                f"Scooter did not accept '{option}' (it now reports {readback})"
+            )
