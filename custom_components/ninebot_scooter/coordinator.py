@@ -92,6 +92,8 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         # GATT layout seen on the last connection attempt (for diagnostics).
         self.gatt_services: dict[str, list[str]] = {}
+        # Why the last attempt failed, kept for diagnostics.
+        self.last_error: str | None = None
 
         # Cached device metadata (read once, on the first successful poll).
         self.serial: str | None = None
@@ -245,14 +247,34 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         try:
             data = await self._with_client(_read_all)
-        except UpdateFailed:
+        except UpdateFailed as err:
+            self.last_error = str(err)
             raise
         except Exception as err:  # noqa: BLE001
+            self.last_error = str(err)
             raise UpdateFailed(f"Error communicating with scooter: {err}") from err
 
+        self.last_error = None
         self.last_update_time = dt_util.utcnow()
         self._last_success = time.monotonic()
         return data
+
+    async def async_capture_gatt(self) -> str | None:
+        """Connect once purely to record the GATT layout, for diagnostics.
+
+        Returns the error message if the attempt failed, else None. Used when a
+        model has never connected successfully - the failure reason and the
+        services it does expose are exactly what's needed to judge new hardware.
+        """
+
+        async def _noop(client: NinebotClient) -> None:
+            return None
+
+        try:
+            await self._with_client(_noop)
+        except Exception as err:  # noqa: BLE001 - diagnostics must never raise
+            return str(err)
+        return None
 
     async def async_write_register(self, index: CtrlIdx | BmsIdx, raw_value: int) -> None:
         """Write a raw register value, then refresh so state reflects the device."""

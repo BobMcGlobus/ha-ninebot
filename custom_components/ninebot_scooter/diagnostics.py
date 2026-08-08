@@ -56,13 +56,29 @@ async def async_get_config_entry_diagnostics(
         "gatt_services": coordinator.gatt_services,
     }
 
+    diag["poll"]["last_error"] = coordinator.last_error
+
     # What the scooter advertises - the key question for an unsupported model.
+    # Fall back to a non-connectable sighting: a passive-only adapter or proxy may
+    # still hear it, which already tells us the advertised name and ids.
     service_info = bluetooth.async_last_service_info(hass, address, connectable=True)
+    connectable_seen = service_info is not None
     if service_info is None:
-        diag["bluetooth"] = {"seen": False}
+        service_info = bluetooth.async_last_service_info(hass, address, connectable=False)
+
+    if service_info is None:
+        diag["bluetooth"] = {
+            "seen": False,
+            "hint": (
+                "The scooter was not seen by Home Assistant when these diagnostics "
+                "were downloaded, so nothing could be captured. Wake the scooter, "
+                "keep it within Bluetooth range, wait a minute and download again."
+            ),
+        }
     else:
         diag["bluetooth"] = {
             "seen": True,
+            "seen_connectable": connectable_seen,
             "name": service_info.name,
             "rssi": service_info.rssi,
             "connectable": service_info.connectable,
@@ -75,5 +91,13 @@ async def async_get_config_entry_diagnostics(
             "service_uuids": list(service_info.service_uuids),
             "service_data_uuids": sorted(service_info.service_data),
         }
+
+    # If we have never got as far as reading the GATT layout, try once now while
+    # the user is watching. For an unsupported model this is the decisive data:
+    # either the services it exposes, or the exact reason connecting fails.
+    if not coordinator.gatt_services and connectable_seen:
+        error = await coordinator.async_capture_gatt()
+        diag["gatt_services"] = coordinator.gatt_services
+        diag["gatt_probe_error"] = error
 
     return diag

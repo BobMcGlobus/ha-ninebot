@@ -15,5 +15,5 @@
   "issue_tracker": "https://github.com/BobMcGlobus/ha-ninebot/issues",
   "loggers": ["custom_components.ninebot_scooter"],
   "requirements": ["sensor-state-data", "bluetooth-sensor-state-data"],
-  "version": "0.5.0"
+  "version": "0.5.1"
 }

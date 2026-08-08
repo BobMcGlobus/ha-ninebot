@@ -50,7 +50,12 @@ def _looks_like_ninebot(discovery_info: BluetoothServiceInfoBleak) -> bool:
     if _is_ninebot(discovery_info):
         return True
     name = (discovery_info.name or "").lower()
-    return name.startswith(_NAME_PREFIXES)
+    if name.startswith(_NAME_PREFIXES):
+        return True
+    # Newer models (e.g. Max G3) advertise their serial number as the BLE name,
+    # such as "1CGBC2510C1691": 14 alphanumeric characters, no separators.
+    raw = discovery_info.name or ""
+    return len(raw) == 14 and raw.isalnum() and raw.isupper() and any(c.isdigit() for c in raw)
 
 
 class NinebotConfigFlow(ConfigFlow, domain=DOMAIN):
