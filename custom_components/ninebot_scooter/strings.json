@@ -3,10 +3,10 @@
     "flow_title": "{name}",
     "step": {
       "bluetooth_confirm": {
-        "description": "Do you want to set up {name}?\n\nAfter setup, on the first poll press the power button on the scooter once when asked, to confirm pairing."
+        "description": "Do you want to set up {name}?\n\nAfter setup, on the first poll press the power button on the scooter once when asked, to confirm pairing.\n\n⚠️ Only the Ninebot MAX G30/G30D is confirmed working. Support for other models (Max G3, G2, F2, E-series …) is under active development and will probably not work yet — reports and diagnostics are welcome."
       },
       "user": {
-        "description": "Choose the Ninebot scooter to set up.\n{note}",
+        "description": "Choose the Ninebot scooter to set up.\n{note}\n\n⚠️ Only the Ninebot MAX G30/G30D is confirmed working. Support for other models (Max G3, G2, F2, E-series …) is under active development and will probably not work yet — reports and diagnostics are welcome.",
         "data": {
           "address": "Bluetooth device"
         }

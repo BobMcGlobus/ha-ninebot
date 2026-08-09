@@ -3,10 +3,10 @@
     "flow_title": "{name}",
     "step": {
       "bluetooth_confirm": {
-        "description": "Möchtest du {name} einrichten?\n\nNach der Einrichtung beim ersten Abruf einmal den Power-Knopf am Roller drücken, wenn danach gefragt wird, um das Pairing zu bestätigen."
+        "description": "Möchtest du {name} einrichten?\n\nNach der Einrichtung beim ersten Abruf einmal den Power-Knopf am Roller drücken, wenn danach gefragt wird, um das Pairing zu bestätigen.\n\n⚠️ Bestätigt funktionsfähig ist nur der Ninebot MAX G30/G30D. Die Unterstützung weiterer Modelle (Max G3, G2, F2, E-Serie …) wird gerade aktiv entwickelt und funktioniert wahrscheinlich noch nicht — Rückmeldungen und Diagnosedaten sind willkommen."
       },
       "user": {
-        "description": "Wähle den einzurichtenden Ninebot-Roller aus.\n{note}",
+        "description": "Wähle den einzurichtenden Ninebot-Roller aus.\n{note}\n\n⚠️ Bestätigt funktionsfähig ist nur der Ninebot MAX G30/G30D. Die Unterstützung weiterer Modelle (Max G3, G2, F2, E-Serie …) wird gerade aktiv entwickelt und funktioniert wahrscheinlich noch nicht — Rückmeldungen und Diagnosedaten sind willkommen.",
         "data": {
           "address": "Bluetooth-Gerät"
         }

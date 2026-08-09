@@ -26,8 +26,20 @@ from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
-from .const import CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL
+from .const import (
+    CONF_POLL_INTERVAL,
+    CONF_PROTOCOL,
+    CONF_V2_PASSWORD,
+    DEFAULT_POLL_INTERVAL,
+    PROTOCOL_LEGACY,
+    PROTOCOL_V2,
+)
 from .ninebot_ble import BmsIdx, CtrlIdx, NinebotClient, iter_register
+from .ninebot_ble.protocol_v2 import (
+    SERVICE_UUID as V2_SERVICE_UUID,
+    V2_REGISTERS,
+    NinebotV2Client,
+)
 from .ninebot_ble.serial_parser import SerialParser
 
 _LOGGER = logging.getLogger(__name__)
@@ -80,6 +92,11 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         self.address: str = entry.unique_id  # type: ignore[assignment]
         self._app_key = app_key
+        self.protocol: str = entry.data.get(CONF_PROTOCOL, PROTOCOL_LEGACY)
+        stored_password = entry.data.get(CONF_V2_PASSWORD)
+        self._v2_password: bytes | None = (
+            bytes.fromhex(stored_password) if stored_password else None
+        )
         self._min_interval: float = float(
             entry.options.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL)
         )
@@ -150,14 +167,9 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # -- BLE session --------------------------------------------------------------
 
     async def _with_client(self, action: Callable[[NinebotClient], Awaitable[_T]]) -> _T:
-        """Run ``action`` inside a fresh, authenticated BLE session."""
+        """Run ``action`` inside a fresh, authenticated legacy BLE session."""
         async with self._lock:
-            ble_device = bluetooth.async_ble_device_from_address(
-                self.hass, self.address, connectable=True
-            )
-            if ble_device is None:
-                raise UpdateFailed(f"{self.address} is not in Bluetooth range")
-
+            ble_device = self._ble_device()
             client = NinebotClient(app_key=self._app_key)
             try:
                 await client.connect(ble_device)
@@ -169,10 +181,125 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     self.gatt_services = client.gatt_services
                 await client.disconnect()
 
-    async def _async_update_data(self) -> dict[str, Any]:
-        """Poll all registers."""
+    def _ble_device(self):
+        ble_device = bluetooth.async_ble_device_from_address(
+            self.hass, self.address, connectable=True
+        )
+        if ble_device is None:
+            raise UpdateFailed(f"{self.address} is not in Bluetooth range")
+        return ble_device
 
-        async def _read_all(client: NinebotClient) -> dict[str, Any]:
+    async def _with_v2_client(
+        self, action: Callable[[NinebotV2Client], Awaitable[_T]]
+    ) -> _T:
+        """Run ``action`` inside a fresh Encryption2 session (newer vehicles)."""
+        async with self._lock:
+            ble_device = self._ble_device()
+            client = NinebotV2Client(password=self._v2_password)
+            try:
+                await client.connect(
+                    ble_device,
+                    on_wait_for_button=lambda: _LOGGER.warning(
+                        "Please press the power button on the vehicle to confirm pairing"
+                    ),
+                )
+                result = await action(client)
+            finally:
+                if client.gatt_services:
+                    self.gatt_services = client.gatt_services
+                await client.disconnect()
+
+            if client.password and client.password != self._v2_password:
+                self._v2_password = client.password
+                self._persist({CONF_V2_PASSWORD: client.password.hex()})
+            if client.serial and not self.serial:
+                self.serial = client.serial
+            return result
+
+    @callback
+    def _persist(self, updates: dict[str, Any]) -> None:
+        """Store values in the config entry so they survive a restart."""
+        entry = self.config_entry
+        if entry is None:
+            return
+        self.hass.config_entries.async_update_entry(
+            entry, data={**entry.data, **updates}
+        )
+
+    async def _async_update_data(self) -> dict[str, Any]:
+        """Poll the vehicle, using whichever protocol it speaks."""
+        try:
+            if self.protocol == PROTOCOL_V2:
+                data = await self._with_v2_client(self._read_all_v2)
+            else:
+                data = await self._legacy_poll()
+        except UpdateFailed as err:
+            self.last_error = str(err)
+            raise
+        except Exception as err:  # noqa: BLE001
+            self.last_error = str(err)
+            raise UpdateFailed(f"Error communicating with scooter: {err}") from err
+
+        self.last_error = None
+        self.last_update_time = dt_util.utcnow()
+        self._last_success = time.monotonic()
+        return data
+
+    async def _legacy_poll(self) -> dict[str, Any]:
+        """Poll over the legacy protocol, switching if the vehicle is a newer one."""
+        try:
+            return await self._with_client(self._read_all_legacy)
+        except Exception:
+            # A newer vehicle advertises the classic service but never answers on
+            # it. If we saw its own service during the attempt, switch protocol
+            # and let the reload rebuild the entities to match.
+            if any(
+                uuid.lower() == V2_SERVICE_UUID for uuid in self.gatt_services
+            ) and self.protocol != PROTOCOL_V2:
+                _LOGGER.info(
+                    "%s speaks the newer Ninebot protocol; switching", self.address
+                )
+                self.protocol = PROTOCOL_V2
+                self._persist({CONF_PROTOCOL: PROTOCOL_V2})
+                return await self._with_v2_client(self._read_all_v2)
+            raise
+
+    async def _read_all_v2(self, client: NinebotV2Client) -> dict[str, Any]:
+        """Read the documented registers of a newer vehicle."""
+        if client.serial:
+            self.serial = client.serial
+            self.model = self.model or "Ninebot (newer protocol)"
+
+        data: dict[str, Any] = {}
+        failed: list[str] = []
+        for reg in V2_REGISTERS:
+            try:
+                raw = await client.read_register(reg.board, reg.index, reg.length)
+            except Exception as err:  # noqa: BLE001 - one bad read must not fail the poll
+                _LOGGER.debug("Failed reading %s: %s", reg.key, err)
+                failed.append(reg.key)
+                continue
+            if len(raw) < reg.length:
+                failed.append(reg.key)
+                continue
+            value = reg.unpack(raw)
+            data[reg.key] = round(value * reg.scale, 3) if reg.scale != 1.0 else value
+
+        if not data:
+            raise UpdateFailed(
+                f"Connected but no register could be read ({len(failed)} attempted)"
+            )
+        if failed:
+            _LOGGER.warning(
+                "Read %d/%d registers; %d failed: %s",
+                len(data),
+                len(data) + len(failed),
+                len(failed),
+                ", ".join(failed),
+            )
+        return data
+
+    async def _read_all_legacy(self, client: NinebotClient) -> dict[str, Any]:
             # Device metadata: read once and cache.
             if self.serial is None:
                 try:
@@ -245,20 +372,6 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
             return data
 
-        try:
-            data = await self._with_client(_read_all)
-        except UpdateFailed as err:
-            self.last_error = str(err)
-            raise
-        except Exception as err:  # noqa: BLE001
-            self.last_error = str(err)
-            raise UpdateFailed(f"Error communicating with scooter: {err}") from err
-
-        self.last_error = None
-        self.last_update_time = dt_util.utcnow()
-        self._last_success = time.monotonic()
-        return data
-
     async def async_capture_gatt(self) -> str | None:
         """Connect once purely to record the GATT layout, for diagnostics.
 
@@ -267,11 +380,14 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         services it does expose are exactly what's needed to judge new hardware.
         """
 
-        async def _noop(client: NinebotClient) -> None:
+        async def _noop(client: Any) -> None:
             return None
 
         try:
-            await self._with_client(_noop)
+            if self.protocol == PROTOCOL_V2:
+                await self._with_v2_client(_noop)
+            else:
+                await self._with_client(_noop)
         except Exception as err:  # noqa: BLE001 - diagnostics must never raise
             return str(err)
         return None

@@ -21,6 +21,13 @@ MAX_SPEED_LIMIT = 30
 
 # Entry data
 CONF_APP_KEY = "app_key"  # hex-encoded 16-byte pairing key, persisted per entry
+CONF_PROTOCOL = "protocol"
+CONF_V2_PASSWORD = "v2_password"  # hex-encoded session password for newer models
+
+# Which BLE dialect a vehicle speaks. Detected on the first connection and then
+# remembered, because it decides which entities exist.
+PROTOCOL_LEGACY = "legacy"  # E / MAX (G30) / F series - confirmed working
+PROTOCOL_V2 = "v2"  # Max G3, G2, E-series mopeds - under active development
 
 # Options
 CONF_POLL_INTERVAL = "poll_interval"

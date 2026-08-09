@@ -10,7 +10,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN
+from .const import DOMAIN, PROTOCOL_V2
 from .coordinator import NinebotCoordinator
 from .entity import NinebotEntity
 from .ninebot_ble import CtrlIdx
@@ -59,6 +59,9 @@ async def async_setup_entry(
 ) -> None:
     """Set up the Ninebot selects."""
     coordinator: NinebotCoordinator = hass.data[DOMAIN][entry.entry_id]
+    if coordinator.protocol == PROTOCOL_V2:
+        # Write support for the newer protocol is not implemented yet.
+        return
     async_add_entities(NinebotSelect(coordinator, desc) for desc in SELECTS)
 
 

@@ -18,7 +18,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN, MAX_SPEED_LIMIT, MIN_SPEED_LIMIT
+from .const import DOMAIN, PROTOCOL_V2, MAX_SPEED_LIMIT, MIN_SPEED_LIMIT
 from .coordinator import NinebotCoordinator
 from .entity import NinebotEntity
 from .ninebot_ble import CtrlIdx
@@ -44,7 +44,12 @@ async def async_setup_entry(
 ) -> None:
     """Set up the Ninebot number entities."""
     coordinator: NinebotCoordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities([NinebotMaxSpeedNumber(coordinator)])
+    if coordinator.protocol == PROTOCOL_V2:
+        # Write support for the newer protocol is not implemented yet.
+        return
+    async_add_entities(
+        [NinebotMaxSpeedNumber(coordinator), NinebotSpeedReleaseNumber(coordinator)]
+    )
 
 
 class NinebotMaxSpeedNumber(NinebotEntity, NumberEntity):
@@ -94,4 +99,52 @@ class NinebotMaxSpeedNumber(NinebotEntity, NumberEntity):
             raise HomeAssistantError(
                 f"Scooter did not accept the new speed limit (it now reports "
                 f"{readback} km/h). The limit was not changed as requested."
+            )
+
+
+class NinebotSpeedReleaseNumber(NinebotEntity, NumberEntity):
+    """Experimental: the "speed limit / speed limit release" register (0x72).
+
+    The register the app's speed lock maps to on many models. Documented
+    behaviour elsewhere in the Ninebot range is that the effective top speed is
+    ``min(rated, lock)`` and that this register takes **whole km/h**, unlike the
+    neighbouring ones. Whether it can also raise the cap depends on the model's
+    read-only rated speed, so treat this as an experiment: set it, then check
+    what the scooter actually does.
+    """
+
+    _attr_name = "Speed limit release (experimental)"
+    _attr_icon = "mdi:speedometer-medium"
+    _attr_native_unit_of_measurement = UnitOfSpeed.KILOMETERS_PER_HOUR
+    _attr_native_min_value = 0
+    _attr_native_max_value = MAX_SPEED_LIMIT
+    _attr_native_step = 1
+    _attr_mode = NumberMode.BOX
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: NinebotCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{coordinator.address}_speed_release"
+
+    @property
+    def native_value(self) -> float | None:
+        """Current value of the release register, in km/h."""
+        value = (self.coordinator.data or {}).get(str(CtrlIdx.NB_CTL_LIMIT_SPD))
+        if value is None:
+            return None
+        # The register description scales by 10; undo that, since this register
+        # is documented as holding whole km/h.
+        return round(float(value) * 10, 1)
+
+    async def async_set_native_value(self, value: float) -> None:
+        """Write the release value as whole km/h."""
+        raw = int(round(value))
+        _LOGGER.debug("Writing speed limit release: %d km/h (raw %d)", raw, raw)
+        readback = await self.coordinator.async_write_and_verify(
+            CtrlIdx.NB_CTL_LIMIT_SPD, raw
+        )
+        if readback is None or abs(float(readback) * 10 - value) > 0.6:
+            raise HomeAssistantError(
+                f"Scooter did not accept the value (it now reports {readback})"
             )

@@ -67,18 +67,27 @@ Safeguards: the entity is disabled by default, values are clamped to
 the register the scooter reports (encoding differs between firmwares). Every write
 is read back and an error is raised if the scooter did not accept it.
 
-## Other / newer models
+## Model support
 
-Confirmed working on the **Max G30D**. Other E / MAX / F series scooters using the
-same protocol are likely to work.
+> ⚠️ **Only the Ninebot MAX G30 / G30D is confirmed working.** Everything else is
+> **under active development and will probably not work yet.** If you have another
+> model, reports are very welcome — please attach the diagnostics download.
 
-Newer models (**Max G3**, E-series, and likely G2/F2) use a **different, newer BLE
-protocol** that this integration does not speak yet — confirmed on a Max G3. They
-expose their own service `6e400001-0000-0000-006e-696e65626f74` ("ninebot" in
-ASCII) and communicate over it. Confusingly they still advertise the classic
-Nordic UART service, but never answer on it, so a connection appears to succeed
-while nothing works. The integration now detects this and says so explicitly
-instead of timing out.
+| Model | Protocol | Status |
+|---|---|---|
+| MAX G30 / G30D | legacy | ✅ Confirmed working (sensors + controls) |
+| E / ES / F series | legacy | Likely to work — untested |
+| **Max G3, G2, F2, E-series** | Encryption2 | 🚧 In development — sensors only, **untested on hardware** |
+
+Newer vehicles speak a different, AES-encrypted protocol over their own GATT
+service `6e400001-0000-0000-006e-696e65626f74` ("ninebot" in ASCII). Confusingly
+they *also* advertise the classic Nordic UART service used by older models, but
+never answer on it. The integration detects which protocol a vehicle speaks on the
+first connection, remembers it, and builds the matching entities. Writing
+(controls) is implemented for the legacy protocol only.
+
+Pairing a newer vehicle may require pressing its power button once while Home
+Assistant connects; the session key is then stored and reused.
 
 **If your model doesn't work, this is the most useful thing you can send:**
 open the integration, use **Download diagnostics**, and attach the file to an

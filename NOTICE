@@ -38,7 +38,15 @@ This project bundles ("vendors") code from the following projects:
    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
    SOFTWARE.
 
-2. miauth — https://github.com/dnandha/miauth
+2. segway-ninebot-ble — https://codeberg.org/NootNooot/segway-ninebot-ble
+   Licensed under the MIT License.
+   The Encryption2 support in
+   custom_components/ninebot_scooter/ninebot_ble/crypto_v2.py and
+   protocol_v2.py is an independent implementation written from that project's
+   protocol documentation (transport, frame formats, encryption algorithm,
+   authentication handshake and command reference). No code was copied.
+
+3. miauth — https://github.com/dnandha/miauth
    Copyright (C) 2021 Daljeet Nandha
    Licensed under the GNU Affero General Public License v3.0.
    The Ninebot crypto slice (NbCrypto) and the crc16 helper are vendored into

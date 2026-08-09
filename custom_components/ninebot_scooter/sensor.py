@@ -17,10 +17,11 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import dt as dt_util
 
-from .const import DOMAIN
+from .const import DOMAIN, PROTOCOL_V2
 from .coordinator import NinebotCoordinator
 from .entity import NinebotEntity
 from .ninebot_ble import BmsIdx, CtrlIdx, get_register_desc, iter_register
+from .ninebot_ble.protocol_v2 import V2_REGISTERS
 
 # Registers exposed as writable controls (switch/select/number) instead of sensors.
 _CONTROL_KEYS: set[str] = {
@@ -111,6 +112,32 @@ def _build_descriptions() -> list[NinebotSensorEntityDescription]:
     return descriptions
 
 
+def _build_v2_descriptions() -> list[NinebotSensorEntityDescription]:
+    """Descriptions for vehicles speaking the newer protocol."""
+    descriptions: list[NinebotSensorEntityDescription] = []
+    for reg in V2_REGISTERS:
+        descriptions.append(
+            NinebotSensorEntityDescription(
+                key=reg.key,
+                reg_key=reg.key,
+                name=reg.key,
+                device_class=(
+                    SensorDeviceClass(reg.device_class) if reg.device_class else None
+                ),
+                native_unit_of_measurement=reg.unit,
+                state_class=(
+                    SensorStateClass.TOTAL_INCREASING
+                    if reg.key == "Total mileage"
+                    else SensorStateClass.MEASUREMENT
+                    if reg.unit
+                    else None
+                ),
+                entity_category=None if reg.primary else EntityCategory.DIAGNOSTIC,
+            )
+        )
+    return descriptions
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -118,8 +145,13 @@ async def async_setup_entry(
 ) -> None:
     """Set up the Ninebot sensors."""
     coordinator: NinebotCoordinator = hass.data[DOMAIN][entry.entry_id]
+    if coordinator.protocol == PROTOCOL_V2:
+        descriptions = _build_v2_descriptions()
+    else:
+        descriptions = _build_descriptions()
+
     entities: list[SensorEntity] = [
-        NinebotSensor(coordinator, description) for description in _build_descriptions()
+        NinebotSensor(coordinator, description) for description in descriptions
     ]
     entities.append(NinebotLastUpdateSensor(coordinator))
     async_add_entities(entities)
