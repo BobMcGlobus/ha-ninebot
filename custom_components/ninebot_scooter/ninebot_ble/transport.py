@@ -22,6 +22,12 @@ _LOGGER = logging.getLogger(__name__)
 NORDIC_UART_RX_UUID = "6e400002-b5a3-f393-e0a9-e50e24dcca9e"
 NORDIC_UART_TX_UUID = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"
 
+# Newer Segway-Ninebot models (Max G3, E-series ...) expose their own service -
+# the tail is ASCII for "ninebot" - and speak a different, encrypted protocol on
+# it. They often still advertise the classic Nordic UART service above, but never
+# answer on it, so its presence alone means nothing.
+NINEBOT_V2_SERVICE_UUID = "6e400001-0000-0000-006e-696e65626f74"
+
 
 class Command(enum.Enum):
     READ = 0x01
@@ -139,7 +145,22 @@ class NinebotClient:
         _LOGGER.debug("Authenticating ...")
 
         # Init
-        resp = await self.request(Packet(DeviceId.PC, DeviceId.ES_BLE, Command.INIT, 0))
+        try:
+            resp = await self.request(Packet(DeviceId.PC, DeviceId.ES_BLE, Command.INIT, 0))
+        except TimeoutError:
+            # Silence on the very first packet, on a model that also offers the
+            # newer Ninebot service, means we are talking the wrong protocol
+            # entirely rather than having a connection problem.
+            if any(
+                uuid.lower() == NINEBOT_V2_SERVICE_UUID for uuid in self.gatt_services
+            ):
+                raise TimeoutError(
+                    "This scooter uses Segway-Ninebot's newer BLE protocol "
+                    f"(service {NINEBOT_V2_SERVICE_UUID}), which this integration "
+                    "does not support yet. Models such as the Max G3 are affected: "
+                    "they still advertise the classic service but never answer on it"
+                ) from None
+            raise
         received_key = resp.data_segment[:16]
         received_serial = resp.data_segment[16:]
 

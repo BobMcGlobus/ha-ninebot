@@ -72,10 +72,13 @@ is read back and an error is raised if the scooter did not accept it.
 Confirmed working on the **Max G30D**. Other E / MAX / F series scooters using the
 same protocol are likely to work.
 
-Newer models (G2, G3, F2, E3 …) may use a **different, newer BLE protocol** that
-this integration does not speak yet. They are no longer rejected outright: if no
-known scooter is found, the setup dialog lists every nearby Bluetooth device so an
-unsupported model can at least be attempted.
+Newer models (**Max G3**, E-series, and likely G2/F2) use a **different, newer BLE
+protocol** that this integration does not speak yet — confirmed on a Max G3. They
+expose their own service `6e400001-0000-0000-006e-696e65626f74` ("ninebot" in
+ASCII) and communicate over it. Confusingly they still advertise the classic
+Nordic UART service, but never answer on it, so a connection appears to succeed
+while nothing works. The integration now detects this and says so explicitly
+instead of timing out.
 
 **If your model doesn't work, this is the most useful thing you can send:**
 open the integration, use **Download diagnostics**, and attach the file to an
