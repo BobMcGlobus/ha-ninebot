@@ -89,6 +89,8 @@ class NinebotV2Client:
         self._auth_param: bytes = b""
         self._rx_buffer = bytearray()
         self._queue: asyncio.Queue[Frame] = asyncio.Queue(32)
+        # Set once the write characteristic's properties are known.
+        self._write_with_response = False
 
     @property
     def is_connected(self) -> bool:
@@ -117,6 +119,17 @@ class NinebotV2Client:
                 f"this protocol. Services seen: {sorted(self.gatt_services)}"
             )
 
+        # Not every module accepts write-without-response; using the wrong write
+        # type means the vehicle silently never receives the frame.
+        write_char = self.client.services.get_characteristic(WRITE_UUID)
+        properties = list(write_char.properties) if write_char else []
+        self._write_with_response = "write-without-response" not in properties
+        _LOGGER.debug(
+            "Write characteristic properties: %s (MTU %s)",
+            properties,
+            getattr(self.client, "mtu_size", "unknown"),
+        )
+
         await self.client.start_notify(NOTIFY_UUID, self._on_notify)
         # Newer firmwares may flush cached notifications from a previous session;
         # let them arrive and be dropped before the handshake starts.
@@ -144,11 +157,35 @@ class NinebotV2Client:
     ) -> None:
         # Phase 1 - PRE_COMM: ask for the challenge and serial, keyed on the
         # advertised device name, in non-SN mode.
-        self.crypto.reset_sn()
-        self.crypto.set_key(name.encode(), None)
-        response = await self._request(
-            BOARD_BLE, CMD_PRE_COMM, 0, b"", expect=CMD_PRE_COMM, timeout=4
-        )
+        #
+        # Which static block feeds the keystream here depends on the device
+        # generation, and getting it wrong is invisible: the vehicle simply cannot
+        # decrypt the frame and never answers. Try both rather than assume.
+        response = None
+        for gen2 in (False, True):
+            self.crypto = NbCryptoV2(gen2=gen2)
+            self.crypto.reset_sn()
+            self.crypto.set_key(name.encode(), None)
+            _LOGGER.debug("PRE_COMM attempt with %s keystream", "Gen2" if gen2 else "Gen3")
+            for attempt in range(3):
+                try:
+                    response = await self._request(
+                        BOARD_BLE, CMD_PRE_COMM, 0, b"", expect=CMD_PRE_COMM, timeout=2.5
+                    )
+                    break
+                except TimeoutError:
+                    _LOGGER.debug("PRE_COMM attempt %d timed out", attempt + 1)
+            if response is not None:
+                _LOGGER.debug("PRE_COMM answered with the %s keystream", "Gen2" if gen2 else "Gen3")
+                break
+
+        if response is None:
+            raise TimeoutError(
+                "Vehicle never answered the PRE_COMM handshake (tried both key "
+                "variants). It may need to be woken up, or it uses a variant of "
+                "the protocol that is not supported yet"
+            )
+
         if len(response.payload) < 30:
             raise TimeoutError(
                 f"Short PRE_COMM response ({len(response.payload)} bytes) - "
@@ -264,9 +301,18 @@ class NinebotV2Client:
     async def _send(self, plaintext: bytes) -> None:
         assert self.client is not None, "Must be connected first"
         data = self.crypto.encrypt(plaintext)
+        _LOGGER.debug(
+            "TX plain %s -> enc %s (%d bytes, %s)",
+            plaintext.hex().upper(),
+            data.hex().upper(),
+            len(data),
+            "with response" if self._write_with_response else "no response",
+        )
         for offset in range(0, len(data), _CHUNK):
             chunk = data[offset : offset + _CHUNK]
-            await self.client.write_gatt_char(WRITE_UUID, chunk, response=False)
+            await self.client.write_gatt_char(
+                WRITE_UUID, chunk, response=self._write_with_response
+            )
             if offset + _CHUNK < len(data):
                 await asyncio.sleep(_CHUNK_DELAY)
 
@@ -276,6 +322,7 @@ class NinebotV2Client:
 
     async def _on_notify(self, _: BleakGATTCharacteristic, data: bytearray) -> None:
         """Reassemble notifications into whole frames and decrypt them."""
+        _LOGGER.debug("RX raw %s (%d bytes)", bytes(data).hex().upper(), len(data))
         self._rx_buffer += data
 
         while True:
