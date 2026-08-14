@@ -29,6 +29,7 @@ from homeassistant.util import dt as dt_util
 from .const import (
     CONF_POLL_INTERVAL,
     CONF_PROTOCOL,
+    CONF_V2_GENERATION,
     CONF_V2_PASSWORD,
     DEFAULT_POLL_INTERVAL,
     PROTOCOL_LEGACY,
@@ -95,6 +96,7 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.address: str = entry.unique_id  # type: ignore[assignment]
         self._app_key = app_key
         self.protocol: str = entry.data.get(CONF_PROTOCOL, PROTOCOL_LEGACY)
+        self._v2_generation: str | None = entry.data.get(CONF_V2_GENERATION)
         stored_password = entry.data.get(CONF_V2_PASSWORD)
         self._v2_password: bytes | None = (
             bytes.fromhex(stored_password) if stored_password else None
@@ -226,7 +228,9 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Run ``action`` inside a fresh Encryption2 session (newer vehicles)."""
         async with self._lock:
             ble_device = self._ble_device()
-            client = NinebotV2Client(password=self._v2_password)
+            client = NinebotV2Client(
+                password=self._v2_password, generation=self._v2_generation
+            )
             try:
                 await client.connect(
                     ble_device,
@@ -240,9 +244,17 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     self.gatt_services = client.gatt_services
                 await client.disconnect()
 
+            updates: dict[str, Any] = {}
             if client.password and client.password != self._v2_password:
                 self._v2_password = client.password
-                self._persist({CONF_V2_PASSWORD: client.password.hex()})
+                updates[CONF_V2_PASSWORD] = client.password.hex()
+            # Remember the generation so later connections skip the sweep - it is
+            # slow, and holding the adapter that long exhausts proxy slots.
+            if client.generation and client.generation != self._v2_generation:
+                self._v2_generation = client.generation
+                updates[CONF_V2_GENERATION] = client.generation
+            if updates:
+                self._persist(updates)
             if client.serial and not self.serial:
                 self.serial = client.serial
             return result

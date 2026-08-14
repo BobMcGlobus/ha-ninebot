@@ -24,6 +24,7 @@ MAX_SPEED_LIMIT = 30
 CONF_APP_KEY = "app_key"  # hex-encoded 16-byte pairing key, persisted per entry
 CONF_PROTOCOL = "protocol"
 CONF_V2_PASSWORD = "v2_password"  # hex-encoded session password for newer models
+CONF_V2_GENERATION = "v2_generation"  # which protocol generation the vehicle uses
 
 # Which BLE dialect a vehicle speaks. Detected on the first connection and then
 # remembered, because it decides which entities exist.

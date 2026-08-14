@@ -114,7 +114,9 @@ def parse_frame(plaintext: bytes) -> Frame | None:
 class NinebotV2Client:
     """Talks Encryption2 to a single vehicle."""
 
-    def __init__(self, password: bytes | None = None) -> None:
+    def __init__(
+        self, password: bytes | None = None, generation: str | None = None
+    ) -> None:
         self.crypto = NbCryptoV2()
         self.client: BleakClient | None = None
         self.gatt_services: dict[str, list[str]] = {}
@@ -129,7 +131,7 @@ class NinebotV2Client:
         self._write_with_response = False
         self._write_uuid = WRITE_UUID
         self._sync2 = 0xA5
-        self.generation: str | None = None
+        self.generation: str | None = generation
         self._write_chars: list[str] = []
         self._notify_chars: list[str] = []
 
@@ -231,7 +233,8 @@ class NinebotV2Client:
         # channel all match its generation. Every wrong combination fails the same
         # silent way, so try the real ones rather than mixing them.
         response = None
-        for gen in (GEN3, GEN2):
+        candidates = (self.generation,) if self.generation else (GEN3, GEN2)
+        for gen in candidates:
             spec = GENERATIONS[gen]
             if spec["write"] not in self._write_chars:
                 _LOGGER.debug("Skipping %s: no %s characteristic", gen, spec["write"][:8])
@@ -331,20 +334,29 @@ class NinebotV2Client:
         notified = False
 
         while True:
-            response = await self._request(
-                BOARD_BLE, CMD_SET_PWD, 0, password, expect=CMD_SET_PWD, timeout=4
-            )
-            if response.index == 1:
-                self.password = password
-                return
-            if asyncio.get_running_loop().time() >= deadline:
-                raise TimeoutError(
-                    "Pairing not confirmed on the vehicle - press its power button "
-                    "while Home Assistant is connecting"
+            # Until the user confirms on the vehicle, it may reply "pending" or
+            # not reply at all - so a timeout here is expected, not fatal. Keep
+            # asking until the deadline, as the official app does.
+            try:
+                response = await self._request(
+                    BOARD_BLE, CMD_SET_PWD, 0, password, expect=CMD_SET_PWD, timeout=2.5
                 )
+                if response.index == 1:
+                    self.password = password
+                    _LOGGER.info("Pairing confirmed on the vehicle")
+                    return
+                _LOGGER.debug("SET_PWD pending (index %d)", response.index)
+            except TimeoutError:
+                _LOGGER.debug("SET_PWD unanswered, still waiting for confirmation")
+
             if not notified and on_wait_for_button is not None:
                 on_wait_for_button()
                 notified = True
+            if asyncio.get_running_loop().time() >= deadline:
+                raise TimeoutError(
+                    "Pairing was not confirmed on the vehicle. Press its power "
+                    "button once while Home Assistant is connecting"
+                )
             await asyncio.sleep(2)
 
     # -- register access -------------------------------------------------------
@@ -451,7 +463,13 @@ class NinebotV2Client:
 
             plaintext, status = self.crypto.decrypt(raw)
             if status != 0:
-                _LOGGER.debug("Dropping frame, decrypt status %d", status)
+                # A reply we cannot decrypt is indistinguishable from no reply at
+                # all unless we say so: -2 means the key is wrong, -3 a replay.
+                _LOGGER.warning(
+                    "Discarding a reply we could not decrypt (status %d, %d bytes)",
+                    status,
+                    len(raw),
+                )
                 continue
             frame = parse_frame(plaintext)
             if frame is None:
