@@ -79,6 +79,11 @@ is read back and an error is raised if the scooter did not accept it.
 | E / ES / F series | legacy | Likely to work — untested |
 | **Max G3, G2, F2, E-series** | Encryption2 | 🚧 In development — sensors only, **untested on hardware** |
 
+**Works on every model, regardless of protocol:** presence (**In range**),
+**Signal strength** and **Last seen**. These come from the Bluetooth
+advertisement, so they need no connection, no pairing and no supported protocol —
+useful on its own for knowing when the scooter arrives, leaves, or is taken.
+
 Newer vehicles speak a different, AES-encrypted protocol over their own GATT
 service `6e400001-0000-0000-006e-696e65626f74` ("ninebot" in ASCII). Confusingly
 they *also* advertise the classic Nordic UART service used by older models, but

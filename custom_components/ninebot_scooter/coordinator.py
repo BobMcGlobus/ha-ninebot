@@ -102,10 +102,17 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         self._lock = asyncio.Lock()
         self._last_success = 0.0  # monotonic time of last SUCCESSFUL poll
+        self._failures = 0  # consecutive failures, used to back off
         self._poll_task: asyncio.Task | None = None
 
         # Wall-clock time of the last successful poll (for the "last updated" sensor).
         self.last_update_time: datetime | None = None
+
+        # Presence, straight from the advertisement. This works on every model,
+        # including ones whose protocol we cannot speak yet.
+        self.in_range = False
+        self.rssi: int | None = None
+        self.last_seen: datetime | None = None
 
         # GATT layout seen on the last connection attempt (for diagnostics).
         self.gatt_services: dict[str, list[str]] = {}
@@ -123,6 +130,16 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     @callback
     def async_start_bluetooth(self) -> CALLBACK_TYPE:
         """Start listening for the scooter's advertisement. Returns an unsub."""
+        # Seed presence from what Home Assistant has already heard, so the state
+        # is right immediately instead of after the next advertisement.
+        self.in_range = bluetooth.async_address_present(
+            self.hass, self.address, connectable=False
+        )
+        if service_info := bluetooth.async_last_service_info(
+            self.hass, self.address, connectable=False
+        ):
+            self.rssi = service_info.rssi
+
         unsubs = [
             bluetooth.async_register_callback(
                 self.hass,
@@ -147,13 +164,21 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self, service_info: BluetoothServiceInfoBleak, change: BluetoothChange
     ) -> None:
         """Scooter is advertising: poll it, unless one is running or too recent."""
+        self.in_range = True
+        self.rssi = service_info.rssi
+        self.last_seen = dt_util.utcnow()
+        self.async_update_listeners()
+
         # Don't overlap an in-flight poll.
         if self._poll_task is not None and not self._poll_task.done():
             return
         # Throttle by time since last SUCCESS. Failed polls are NOT throttled, so
         # the next advertisement retries immediately - important because the
         # scooter is often only awake for a short window (arriving/leaving).
-        if time.monotonic() - self._last_success < self._min_interval:
+        # After repeated failures back off, so a vehicle we cannot talk to at all
+        # does not occupy the Bluetooth adapter continuously.
+        interval = self._min_interval * min(2**self._failures, 20)
+        if time.monotonic() - self._last_success < interval:
             return
         self._poll_task = self.hass.async_create_task(
             self.async_refresh(), "ninebot_scooter poll", eager_start=False
@@ -163,6 +188,9 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def _async_on_unavailable(self, service_info: BluetoothServiceInfoBleak) -> None:
         """Scooter is no longer heard; keep last values, just note it."""
         _LOGGER.debug("Scooter %s no longer seen over Bluetooth", self.address)
+        self.in_range = False
+        self.rssi = None
+        self.async_update_listeners()
 
     # -- BLE session --------------------------------------------------------------
 
@@ -235,11 +263,14 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 data = await self._legacy_poll()
         except UpdateFailed as err:
             self.last_error = str(err)
+            self._failures += 1
             raise
         except Exception as err:  # noqa: BLE001
             self.last_error = str(err)
+            self._failures += 1
             raise UpdateFailed(f"Error communicating with scooter: {err}") from err
 
+        self._failures = 0
         self.last_error = None
         self.last_update_time = dt_util.utcnow()
         self._last_success = time.monotonic()

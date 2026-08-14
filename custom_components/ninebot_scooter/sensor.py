@@ -154,6 +154,9 @@ async def async_setup_entry(
         NinebotSensor(coordinator, description) for description in descriptions
     ]
     entities.append(NinebotLastUpdateSensor(coordinator))
+    # Advertisement-based, so these work even on models we cannot talk to yet.
+    entities.append(NinebotSignalSensor(coordinator))
+    entities.append(NinebotLastSeenSensor(coordinator))
     async_add_entities(entities)
 
 
@@ -223,3 +226,56 @@ class NinebotLastUpdateSensor(NinebotEntity, RestoreSensor):
     def available(self) -> bool:
         """Available once we have ever polled successfully."""
         return self.native_value is not None
+
+
+class NinebotSignalSensor(NinebotEntity, SensorEntity):
+    """Bluetooth signal strength of the scooter's advertisement."""
+
+    _attr_name = "Signal strength"
+    _attr_device_class = SensorDeviceClass.SIGNAL_STRENGTH
+    _attr_native_unit_of_measurement = "dBm"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: NinebotCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{coordinator.address}_rssi"
+
+    @property
+    def available(self) -> bool:
+        """Known whenever the scooter is being heard, no connection needed."""
+        return self.coordinator.rssi is not None
+
+    @property
+    def native_value(self) -> int | None:
+        return self.coordinator.rssi
+
+
+class NinebotLastSeenSensor(NinebotEntity, RestoreSensor):
+    """When the scooter's advertisement was last heard."""
+
+    _attr_name = "Last seen"
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: NinebotCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{coordinator.address}_last_seen"
+        self._restored: datetime | None = None
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        if (last := await self.async_get_last_sensor_data()) is not None:
+            value = last.native_value
+            if isinstance(value, str):
+                value = dt_util.parse_datetime(value)
+            if isinstance(value, datetime):
+                self._restored = value
+
+    @property
+    def available(self) -> bool:
+        return self.native_value is not None
+
+    @property
+    def native_value(self) -> datetime | None:
+        return self.coordinator.last_seen or self._restored

@@ -11,6 +11,7 @@ PLATFORMS: list[Platform] = [
     Platform.SELECT,
     Platform.NUMBER,
     Platform.LOCK,
+    Platform.BINARY_SENSOR,
 ]
 
 # Speed override bounds, in km/h. The ceiling is what the Max hardware itself is
