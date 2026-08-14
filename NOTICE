@@ -40,6 +40,9 @@ This project bundles ("vendors") code from the following projects:
 
 2. segway-ninebot-ble — https://codeberg.org/NootNooot/segway-ninebot-ble
    Licensed under the MIT License.
+   The companion client segway-ninebot-ble-cli (Apache-2.0, Copyright 2026
+   NootNooot) was additionally consulted to verify frame layouts and key
+   derivation for both protocol generations.
    The Encryption2 support in
    custom_components/ninebot_scooter/ninebot_ble/crypto_v2.py and
    protocol_v2.py is an independent implementation written from that project's

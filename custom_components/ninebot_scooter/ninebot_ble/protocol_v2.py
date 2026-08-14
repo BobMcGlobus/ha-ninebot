@@ -20,7 +20,7 @@ from bleak.backends.characteristic import BleakGATTCharacteristic
 from bleak.backends.device import BLEDevice
 from bleak_retry_connector import establish_connection
 
-from .crypto_v2 import NbCryptoV2
+from .crypto_v2 import FW_DATA, NbCryptoV2
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -29,12 +29,40 @@ WRITE_UUID = "6e400002-0000-0000-006e-696e65626f74"
 NOTIFY_UUID = "6e400004-0000-0000-006e-696e65626f74"
 RCTP_WRITE_UUID = "6e400003-0000-0000-006e-696e65626f74"
 NORDIC_SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e"
+# Standard GATT Device Name: the vehicle's serial, which is the encryption key.
+GATT_DEVICE_NAME_UUID = "00002a00-0000-1000-8000-00805f9b34fb"
 
-SYNC = b"\x5a\xa5"
+NORDIC_WRITE_UUID = "6e400002-b5a3-f393-e0a9-e50e24dcca9e"
+NORDIC_NOTIFY_UUID = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"
+
+SYNC1 = 0x5A
 BT_ID = 0x3E
 
+# The two generations differ in more than the keystream: the second sync byte and
+# the preferred GATT service change too. Sending a frame with the wrong sync byte
+# is invisible - the vehicle's parser never recognises a frame and stays silent.
+GEN2 = "gen2"  # 0x5AA5, fw_data keystream, Nordic UART - E125S and older
+GEN3 = "gen3"  # 0x5AB5, zero keystream, Ninebot Custom - newer models
+
+GENERATIONS: dict[str, dict[str, Any]] = {
+    GEN3: {
+        "sync2": 0xB5,
+        "gen2_keystream": False,
+        "write": WRITE_UUID,
+        "notify": NOTIFY_UUID,
+    },
+    GEN2: {
+        "sync2": 0xA5,
+        "gen2_keystream": True,
+        "write": NORDIC_WRITE_UUID,
+        "notify": NORDIC_NOTIFY_UUID,
+    },
+}
+VALID_SYNC2 = {0xA5, 0xB5}
+
 # Boards
-BOARD_DIS = 0x01  # dashboard; stays awake and proxies values from sleeping boards
+BOARD_DIS = 0x01  # dashboard on E-series; proxies values from sleeping boards
+BOARD_VCU = 0x16  # vehicle control unit; where kick scooters keep their data
 BOARD_BLE = 0x04
 
 # Commands
@@ -59,18 +87,24 @@ class Frame:
     payload: bytes
 
 
-def build_frame(target: int, command: int, index: int, payload: bytes = b"") -> bytes:
-    """Assemble a plaintext Encryption2 frame."""
-    return SYNC + bytes([len(payload), BT_ID, target, command, index]) + payload
+def build_frame(
+    target: int, command: int, index: int, payload: bytes = b"", sync2: int = 0xA5
+) -> bytes:
+    """Assemble a plaintext frame for the given generation."""
+    return bytes([SYNC1, sync2, len(payload), BT_ID, target, command, index]) + payload
 
 
 def parse_frame(plaintext: bytes) -> Frame | None:
-    """Decode a plaintext frame, or None if it is malformed."""
-    if len(plaintext) < 7 or plaintext[:2] != SYNC:
+    """Decode a plaintext reply, or None if it is malformed.
+
+    Replies carry the source board where requests carry the protocol id, so the
+    two fields are swapped compared to :func:`build_frame`.
+    """
+    if len(plaintext) < 7 or plaintext[0] != SYNC1 or plaintext[1] not in VALID_SYNC2:
         return None
     length = plaintext[2]
     return Frame(
-        target=plaintext[4],
+        target=plaintext[3],
         command=plaintext[5],
         index=plaintext[6],
         payload=plaintext[7 : 7 + length],
@@ -94,6 +128,8 @@ class NinebotV2Client:
         # Discovered on connect; the working combination is found by trying.
         self._write_with_response = False
         self._write_uuid = WRITE_UUID
+        self._sync2 = 0xA5
+        self.generation: str | None = None
         self._write_chars: list[str] = []
         self._notify_chars: list[str] = []
 
@@ -156,6 +192,18 @@ class NinebotV2Client:
         await asyncio.sleep(0.2)
         self._drain()
 
+        # The name is the encryption key, and a wrong one is rejected silently.
+        # Prefer the name the vehicle reports over GATT: the advertised name can
+        # be shortened or stale.
+        try:
+            raw_name = await self.client.read_gatt_char(GATT_DEVICE_NAME_UUID)
+            gatt_name = raw_name.decode("ascii", errors="ignore").replace("\x00", "").strip()
+            if gatt_name and gatt_name != name:
+                _LOGGER.debug("Using GATT device name %r instead of %r", gatt_name, name)
+                name = gatt_name
+        except Exception as err:  # noqa: BLE001 - advisory, the advert name may do
+            _LOGGER.debug("Could not read the GATT device name: %s", err)
+
         await self._handshake(name, pair_timeout, on_wait_for_button)
 
     async def disconnect(self) -> None:
@@ -179,54 +227,54 @@ class NinebotV2Client:
         # Phase 1 - PRE_COMM: ask for the challenge and serial, keyed on the
         # advertised device name, in non-SN mode.
         #
-        # The keystream variant, the write channel and the write type all fail
-        # the same silent way - the vehicle simply never answers - so sweep the
-        # plausible combinations instead of trusting any single one.
-        write_candidates = [
-            uuid for uuid in (WRITE_UUID, RCTP_WRITE_UUID) if uuid in self._write_chars
-        ]
+        # A vehicle answers only when the sync byte, the keystream and the GATT
+        # channel all match its generation. Every wrong combination fails the same
+        # silent way, so try the real ones rather than mixing them.
         response = None
-        for gen2 in (False, True):
-            for write_uuid in write_candidates:
-                for with_response in (False, True):
-                    self._write_uuid = write_uuid
-                    self._write_with_response = with_response
-                    self.crypto = NbCryptoV2(gen2=gen2)
-                    self.crypto.reset_sn()
-                    self.crypto.set_key(name.encode(), None)
-                    _LOGGER.debug(
-                        "PRE_COMM try: %s keystream, write %s, %s",
-                        "Gen2" if gen2 else "Gen3",
-                        write_uuid[:8],
-                        "with response" if with_response else "no response",
+        for gen in (GEN3, GEN2):
+            spec = GENERATIONS[gen]
+            if spec["write"] not in self._write_chars:
+                _LOGGER.debug("Skipping %s: no %s characteristic", gen, spec["write"][:8])
+                continue
+            for with_response in (False, True):
+                self._sync2 = spec["sync2"]
+                self._write_uuid = spec["write"]
+                self._write_with_response = with_response
+                self.crypto = NbCryptoV2(gen2=spec["gen2_keystream"])
+                self.crypto.reset_sn()
+                # On Gen2 the constant is both the static keystream block and the
+                # second half of the key material; Gen3 uses zeros for both.
+                self.crypto.set_key(
+                    name.encode(), FW_DATA if spec["gen2_keystream"] else None
+                )
+                _LOGGER.debug(
+                    "PRE_COMM try: %s (sync 5A%02X, write %s, %s)",
+                    gen,
+                    spec["sync2"],
+                    spec["write"][:8],
+                    "with response" if with_response else "no response",
+                )
+                try:
+                    response = await self._request(
+                        BOARD_BLE, CMD_PRE_COMM, 0, b"", expect=CMD_PRE_COMM, timeout=2.5
                     )
-                    try:
-                        response = await self._request(
-                            BOARD_BLE, CMD_PRE_COMM, 0, b"", expect=CMD_PRE_COMM, timeout=2.5
-                        )
-                    except TimeoutError:
-                        continue
-                    except Exception as err:  # noqa: BLE001 - a rejected write is informative
-                        _LOGGER.debug("Write failed on this combination: %s", err)
-                        continue
-                    _LOGGER.info(
-                        "PRE_COMM answered: %s keystream, write %s, %s",
-                        "Gen2" if gen2 else "Gen3",
-                        write_uuid,
-                        "with response" if with_response else "no response",
-                    )
-                    break
-                if response is not None:
-                    break
+                except TimeoutError:
+                    continue
+                except Exception as err:  # noqa: BLE001 - a rejected write is informative
+                    _LOGGER.debug("Write failed on this combination: %s", err)
+                    continue
+                _LOGGER.info("Handshake accepted by the vehicle as %s", gen)
+                self.generation = gen
+                break
             if response is not None:
                 break
 
         if response is None:
             raise TimeoutError(
-                "Vehicle never answered the handshake on any channel (tried both "
-                "key variants, both write characteristics and both write types). "
-                "Make sure the vehicle is switched on - not just awake - and that "
-                "the official Segway-Ninebot app is not connected to it"
+                "Vehicle never answered the handshake on any protocol generation "
+                "(tried 5AA5 over Nordic UART and 5AB5 over the Ninebot service, "
+                "with and without write acknowledgement). Make sure it is switched "
+                "on and that the official Segway-Ninebot app is not connected"
             )
 
         if len(response.payload) < 30:
@@ -322,7 +370,7 @@ class NinebotV2Client:
     ) -> Frame:
         """Send a frame and wait for the matching reply."""
         self._drain()
-        await self._send(build_frame(target, command, index, payload))
+        await self._send(self._frame(target, command, index, payload))
 
         loop = asyncio.get_running_loop()
         deadline = loop.time() + timeout
@@ -340,6 +388,9 @@ class NinebotV2Client:
         raise TimeoutError(
             f"No response to command 0x{command:02X} index 0x{index:02X}"
         )
+
+    def _frame(self, target: int, command: int, index: int, payload: bytes = b"") -> bytes:
+        return build_frame(target, command, index, payload, sync2=self._sync2)
 
     async def _send(self, plaintext: bytes) -> None:
         assert self.client is not None, "Must be connected first"
@@ -376,7 +427,11 @@ class NinebotV2Client:
         self._rx_buffer += data
 
         while True:
-            start = self._rx_buffer.find(SYNC)
+            start = -1
+            for candidate in (bytes([SYNC1, 0xA5]), bytes([SYNC1, 0xB5])):
+                found = self._rx_buffer.find(candidate)
+                if found >= 0 and (start < 0 or found < start):
+                    start = found
             if start < 0:
                 # Keep only a trailing partial sync byte.
                 self._rx_buffer = self._rx_buffer[-1:]

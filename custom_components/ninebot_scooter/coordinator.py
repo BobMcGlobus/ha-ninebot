@@ -36,6 +36,8 @@ from .const import (
 )
 from .ninebot_ble import BmsIdx, CtrlIdx, NinebotClient, iter_register
 from .ninebot_ble.protocol_v2 import (
+    BOARD_DIS,
+    BOARD_VCU,
     SERVICE_UUID as V2_SERVICE_UUID,
     V2_REGISTERS,
     NinebotV2Client,
@@ -103,6 +105,7 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._lock = asyncio.Lock()
         self._last_success = 0.0  # monotonic time of last SUCCESSFUL poll
         self._failures = 0  # consecutive failures, used to back off
+        self._v2_board: int | None = None
         self._poll_task: asyncio.Task | None = None
 
         # Wall-clock time of the last successful poll (for the "last updated" sensor).
@@ -295,17 +298,40 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 return await self._with_v2_client(self._read_all_v2)
             raise
 
+    async def _find_v2_board(self, client: NinebotV2Client) -> int:
+        """Work out which board answers register reads on this vehicle.
+
+        Kick scooters keep vehicle data on the VCU, the E-series mopeds on the
+        dashboard, and the module layout differs per model - so ask rather than
+        assume.
+        """
+        if self._v2_board is not None:
+            return self._v2_board
+        probe = V2_REGISTERS[0]
+        for board in (BOARD_VCU, BOARD_DIS):
+            try:
+                await client.read_register(board, probe.index, probe.length)
+            except Exception:  # noqa: BLE001 - probing, failure is expected
+                continue
+            _LOGGER.info("Vehicle answers register reads on board 0x%02X", board)
+            self._v2_board = board
+            return board
+        # Nothing answered; keep the documented default so the poll still reports
+        # a useful failure rather than silently doing nothing.
+        return BOARD_VCU
+
     async def _read_all_v2(self, client: NinebotV2Client) -> dict[str, Any]:
         """Read the documented registers of a newer vehicle."""
         if client.serial:
             self.serial = client.serial
             self.model = self.model or "Ninebot (newer protocol)"
 
+        board = await self._find_v2_board(client)
         data: dict[str, Any] = {}
         failed: list[str] = []
         for reg in V2_REGISTERS:
             try:
-                raw = await client.read_register(reg.board, reg.index, reg.length)
+                raw = await client.read_register(board, reg.index, reg.length)
             except Exception as err:  # noqa: BLE001 - one bad read must not fail the poll
                 _LOGGER.debug("Failed reading %s: %s", reg.key, err)
                 failed.append(reg.key)
