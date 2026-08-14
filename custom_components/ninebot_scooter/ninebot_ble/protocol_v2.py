@@ -144,7 +144,7 @@ class NinebotV2Client:
     async def connect(
         self,
         device: BLEDevice,
-        pair_timeout: float = 60.0,
+        pair_timeout: float = 120.0,
         on_wait_for_button: Callable[[], None] | None = None,
     ) -> None:
         """Connect and run the three-phase handshake."""
@@ -294,9 +294,19 @@ class NinebotV2Client:
             self.serial,
             has_stored_password,
         )
+        if has_stored_password and not self.password:
+            _LOGGER.info(
+                "%s is already paired with another client (typically the official "
+                "app). Registering Home Assistant needs the power button pressed.",
+                self.serial,
+            )
 
         self.crypto.set_auth(self._auth_param)
         self.crypto.start_sn()
+        # Anything still in flight was encrypted with the previous key, so it can
+        # only decrypt to noise from here on. Drop it rather than warn about it.
+        self._rx_buffer.clear()
+        self._drain()
 
         # Phase 2 - SET_PWD, unless we can reuse a password from a previous
         # session (which avoids asking the user for a button press again).

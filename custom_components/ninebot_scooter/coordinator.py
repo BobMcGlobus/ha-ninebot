@@ -14,7 +14,7 @@ import time
 from datetime import datetime
 from typing import Any, Awaitable, Callable, TypeVar
 
-from homeassistant.components import bluetooth
+from homeassistant.components import bluetooth, persistent_notification
 from homeassistant.components.bluetooth import (
     BluetoothChange,
     BluetoothScanningMode,
@@ -108,6 +108,7 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._last_success = 0.0  # monotonic time of last SUCCESSFUL poll
         self._failures = 0  # consecutive failures, used to back off
         self._v2_board: int | None = None
+        self._button_notification_id = f"ninebot_pair_{entry.entry_id}"
         self._poll_task: asyncio.Task | None = None
 
         # Wall-clock time of the last successful poll (for the "last updated" sensor).
@@ -233,11 +234,9 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
             try:
                 await client.connect(
-                    ble_device,
-                    on_wait_for_button=lambda: _LOGGER.warning(
-                        "Please press the power button on the vehicle to confirm pairing"
-                    ),
+                    ble_device, on_wait_for_button=self._async_ask_for_button
                 )
+                self._dismiss_button_prompt()
                 result = await action(client)
             finally:
                 if client.gatt_services:
@@ -258,6 +257,30 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if client.serial and not self.serial:
                 self.serial = client.serial
             return result
+
+    @callback
+    def _async_ask_for_button(self) -> None:
+        """Ask the user to confirm pairing, visibly rather than only in the log.
+
+        The vehicle will not register us until its power button is pressed, and
+        the window is short - a log line nobody is watching is no use.
+        """
+        _LOGGER.warning("Waiting for the power button to be pressed on %s", self.name)
+        persistent_notification.async_create(
+            self.hass,
+            (
+                f"**{self.name}** is waiting to be paired.\n\n"
+                "Press the **power button on the scooter once, now** to confirm. "
+                "Home Assistant will keep asking for about a minute.\n\n"
+                "This is only needed once."
+            ),
+            title="Ninebot: confirm pairing on the scooter",
+            notification_id=self._button_notification_id,
+        )
+
+    @callback
+    def _dismiss_button_prompt(self) -> None:
+        persistent_notification.async_dismiss(self.hass, self._button_notification_id)
 
     @callback
     def _persist(self, updates: dict[str, Any]) -> None:
