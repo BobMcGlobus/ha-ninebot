@@ -27,6 +27,8 @@ _LOGGER = logging.getLogger(__name__)
 SERVICE_UUID = "6e400001-0000-0000-006e-696e65626f74"
 WRITE_UUID = "6e400002-0000-0000-006e-696e65626f74"
 NOTIFY_UUID = "6e400004-0000-0000-006e-696e65626f74"
+RCTP_WRITE_UUID = "6e400003-0000-0000-006e-696e65626f74"
+NORDIC_SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e"
 
 SYNC = b"\x5a\xa5"
 BT_ID = 0x3E
@@ -89,8 +91,11 @@ class NinebotV2Client:
         self._auth_param: bytes = b""
         self._rx_buffer = bytearray()
         self._queue: asyncio.Queue[Frame] = asyncio.Queue(32)
-        # Set once the write characteristic's properties are known.
+        # Discovered on connect; the working combination is found by trying.
         self._write_with_response = False
+        self._write_uuid = WRITE_UUID
+        self._write_chars: list[str] = []
+        self._notify_chars: list[str] = []
 
     @property
     def is_connected(self) -> bool:
@@ -119,18 +124,33 @@ class NinebotV2Client:
                 f"this protocol. Services seen: {sorted(self.gatt_services)}"
             )
 
-        # Not every module accepts write-without-response; using the wrong write
-        # type means the vehicle silently never receives the frame.
-        write_char = self.client.services.get_characteristic(WRITE_UUID)
-        properties = list(write_char.properties) if write_char else []
-        self._write_with_response = "write-without-response" not in properties
-        _LOGGER.debug(
-            "Write characteristic properties: %s (MTU %s)",
-            properties,
-            getattr(self.client, "mtu_size", "unknown"),
-        )
-
-        await self.client.start_notify(NOTIFY_UUID, self._on_notify)
+        # Subscribe to every characteristic that can notify, not just the one the
+        # documentation names: if a model answers on a different channel we would
+        # otherwise see complete silence and have no way to tell.
+        self._notify_chars = []
+        self._write_chars = []
+        for service in self.client.services:
+            if str(service.uuid).lower() not in (SERVICE_UUID, NORDIC_SERVICE_UUID):
+                continue
+            for char in service.characteristics:
+                properties = set(char.properties)
+                if properties & {"notify", "indicate"}:
+                    try:
+                        await self.client.start_notify(char, self._on_notify)
+                        self._notify_chars.append(str(char.uuid))
+                    except Exception as err:  # noqa: BLE001 - best effort per channel
+                        _LOGGER.debug("Could not subscribe to %s: %s", char.uuid, err)
+                if properties & {"write", "write-without-response"}:
+                    self._write_chars.append(str(char.uuid).lower())
+                if str(char.uuid).lower() == WRITE_UUID:
+                    _LOGGER.debug(
+                        "Write characteristic properties: %s (MTU %s)",
+                        sorted(properties),
+                        getattr(self.client, "mtu_size", "unknown"),
+                    )
+        _LOGGER.debug("Listening on: %s", self._notify_chars)
+        if not self._notify_chars:
+            raise TimeoutError("Vehicle exposes no notification channel to listen on")
         # Newer firmwares may flush cached notifications from a previous session;
         # let them arrive and be dropped before the handshake starts.
         await asyncio.sleep(0.2)
@@ -140,10 +160,11 @@ class NinebotV2Client:
 
     async def disconnect(self) -> None:
         if self.client and self.client.is_connected:
-            try:
-                await self.client.stop_notify(NOTIFY_UUID)
-            except Exception:  # noqa: BLE001 - best effort on teardown
-                pass
+            for uuid in self._notify_chars:
+                try:
+                    await self.client.stop_notify(uuid)
+                except Exception:  # noqa: BLE001 - best effort on teardown
+                    pass
             await self.client.disconnect()
         self.client = None
 
@@ -158,32 +179,54 @@ class NinebotV2Client:
         # Phase 1 - PRE_COMM: ask for the challenge and serial, keyed on the
         # advertised device name, in non-SN mode.
         #
-        # Which static block feeds the keystream here depends on the device
-        # generation, and getting it wrong is invisible: the vehicle simply cannot
-        # decrypt the frame and never answers. Try both rather than assume.
+        # The keystream variant, the write channel and the write type all fail
+        # the same silent way - the vehicle simply never answers - so sweep the
+        # plausible combinations instead of trusting any single one.
+        write_candidates = [
+            uuid for uuid in (WRITE_UUID, RCTP_WRITE_UUID) if uuid in self._write_chars
+        ]
         response = None
         for gen2 in (False, True):
-            self.crypto = NbCryptoV2(gen2=gen2)
-            self.crypto.reset_sn()
-            self.crypto.set_key(name.encode(), None)
-            _LOGGER.debug("PRE_COMM attempt with %s keystream", "Gen2" if gen2 else "Gen3")
-            for attempt in range(3):
-                try:
-                    response = await self._request(
-                        BOARD_BLE, CMD_PRE_COMM, 0, b"", expect=CMD_PRE_COMM, timeout=2.5
+            for write_uuid in write_candidates:
+                for with_response in (False, True):
+                    self._write_uuid = write_uuid
+                    self._write_with_response = with_response
+                    self.crypto = NbCryptoV2(gen2=gen2)
+                    self.crypto.reset_sn()
+                    self.crypto.set_key(name.encode(), None)
+                    _LOGGER.debug(
+                        "PRE_COMM try: %s keystream, write %s, %s",
+                        "Gen2" if gen2 else "Gen3",
+                        write_uuid[:8],
+                        "with response" if with_response else "no response",
+                    )
+                    try:
+                        response = await self._request(
+                            BOARD_BLE, CMD_PRE_COMM, 0, b"", expect=CMD_PRE_COMM, timeout=2.5
+                        )
+                    except TimeoutError:
+                        continue
+                    except Exception as err:  # noqa: BLE001 - a rejected write is informative
+                        _LOGGER.debug("Write failed on this combination: %s", err)
+                        continue
+                    _LOGGER.info(
+                        "PRE_COMM answered: %s keystream, write %s, %s",
+                        "Gen2" if gen2 else "Gen3",
+                        write_uuid,
+                        "with response" if with_response else "no response",
                     )
                     break
-                except TimeoutError:
-                    _LOGGER.debug("PRE_COMM attempt %d timed out", attempt + 1)
+                if response is not None:
+                    break
             if response is not None:
-                _LOGGER.debug("PRE_COMM answered with the %s keystream", "Gen2" if gen2 else "Gen3")
                 break
 
         if response is None:
             raise TimeoutError(
-                "Vehicle never answered the PRE_COMM handshake (tried both key "
-                "variants). It may need to be woken up, or it uses a variant of "
-                "the protocol that is not supported yet"
+                "Vehicle never answered the handshake on any channel (tried both "
+                "key variants, both write characteristics and both write types). "
+                "Make sure the vehicle is switched on - not just awake - and that "
+                "the official Segway-Ninebot app is not connected to it"
             )
 
         if len(response.payload) < 30:
@@ -311,7 +354,7 @@ class NinebotV2Client:
         for offset in range(0, len(data), _CHUNK):
             chunk = data[offset : offset + _CHUNK]
             await self.client.write_gatt_char(
-                WRITE_UUID, chunk, response=self._write_with_response
+                self._write_uuid, chunk, response=self._write_with_response
             )
             if offset + _CHUNK < len(data):
                 await asyncio.sleep(_CHUNK_DELAY)
@@ -320,9 +363,16 @@ class NinebotV2Client:
         while not self._queue.empty():
             self._queue.get_nowait()
 
-    async def _on_notify(self, _: BleakGATTCharacteristic, data: bytearray) -> None:
+    async def _on_notify(
+        self, sender: BleakGATTCharacteristic, data: bytearray
+    ) -> None:
         """Reassemble notifications into whole frames and decrypt them."""
-        _LOGGER.debug("RX raw %s (%d bytes)", bytes(data).hex().upper(), len(data))
+        _LOGGER.debug(
+            "RX on %s: %s (%d bytes)",
+            getattr(sender, "uuid", "?"),
+            bytes(data).hex().upper(),
+            len(data),
+        )
         self._rx_buffer += data
 
         while True:
