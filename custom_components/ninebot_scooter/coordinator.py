@@ -220,6 +220,18 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.hass, self.address, connectable=True
         )
         if ble_device is None:
+            # A firmware update can change the Bluetooth address, and some
+            # firmwares rotate it for privacy. The advertised name is the serial
+            # number, so fall back to that rather than going blind.
+            for info in bluetooth.async_discovered_service_info(self.hass, True):
+                if info.name and info.name == self.name:
+                    _LOGGER.info(
+                        "%s now advertises from %s; using that address",
+                        self.name,
+                        info.address,
+                    )
+                    return info.device
+        if ble_device is None:
             raise UpdateFailed(f"{self.address} is not in Bluetooth range")
         return ble_device
 
