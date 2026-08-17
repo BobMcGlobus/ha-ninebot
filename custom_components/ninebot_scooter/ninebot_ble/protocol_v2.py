@@ -312,7 +312,9 @@ class NinebotV2Client:
         # session (which avoids asking the user for a button press again).
         if not (self.password and has_stored_password):
             self.crypto.set_key(name.encode(), self._auth_param)
-            await self._set_password(pair_timeout, on_wait_for_button)
+            await self._set_password(
+                pair_timeout, on_wait_for_button, has_stored_password
+            )
 
         # Phase 3 - AUTH, keyed on the session password.
         assert self.password is not None
@@ -334,7 +336,10 @@ class NinebotV2Client:
         _LOGGER.debug("Authenticated successfully")
 
     async def _set_password(
-        self, pair_timeout: float, on_wait_for_button: Callable[[], None] | None
+        self,
+        pair_timeout: float,
+        on_wait_for_button: Callable[[], None] | None,
+        already_paired: bool = False,
     ) -> None:
         """Register a session password, waiting for the user to confirm."""
         # The vehicle simply stores whatever we send, so a strong random value is
@@ -359,10 +364,20 @@ class NinebotV2Client:
             except TimeoutError:
                 _LOGGER.debug("SET_PWD unanswered, still waiting for confirmation")
 
-            if not notified and on_wait_for_button is not None:
+            if not notified and not already_paired and on_wait_for_button is not None:
                 on_wait_for_button()
                 notified = True
             if asyncio.get_running_loop().time() >= deadline:
+                if already_paired:
+                    # A vehicle that already holds someone else's password will
+                    # not take a new one, no matter how often the button is
+                    # pressed - so don't keep telling the user to press it.
+                    raise TimeoutError(
+                        "The vehicle refuses to register a new pairing because it "
+                        "is still linked to another client. Remove it from your "
+                        "account in the Segway-Ninebot app and try again, or enter "
+                        "the existing pairing password in the integration options"
+                    )
                 raise TimeoutError(
                     "Pairing was not confirmed on the vehicle. Press its power "
                     "button once while Home Assistant is connecting"

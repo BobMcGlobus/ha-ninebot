@@ -24,12 +24,17 @@
       "init": {
         "title": "Ninebot-Optionen",
         "data": {
-          "poll_interval": "Abrufintervall (Sekunden)"
+          "poll_interval": "Abrufintervall (Sekunden)",
+          "v2_password": "Pairing-Passwort (hex, optional)"
         },
         "data_description": {
-          "poll_interval": "Wie oft der Roller (wenn wach) verbunden und ausgelesen wird. Kleiner = reaktionsschneller, aber mehr Bluetooth-Last und Akkuverbrauch."
+          "poll_interval": "Wie oft der Roller (wenn wach) verbunden und ausgelesen wird. Kleiner = reaktionsschneller, aber mehr Bluetooth-Last und Akkuverbrauch.",
+          "v2_password": "Nur nötig für neuere Modelle, die bereits mit der offiziellen Segway-Ninebot-App verknüpft sind und deshalb kein neues Pairing annehmen. 32 Hex-Zeichen. Sonst leer lassen."
         }
       }
+    },
+    "error": {
+      "invalid_password": "Muss aus 32 Hex-Zeichen (16 Byte) bestehen."
     }
   }
 }

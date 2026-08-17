@@ -25,6 +25,7 @@ from homeassistant.helpers.selector import (
 
 from .const import (
     CONF_POLL_INTERVAL,
+    CONF_V2_PASSWORD,
     DEFAULT_POLL_INTERVAL,
     DOMAIN,
     MAX_POLL_INTERVAL,
@@ -155,8 +156,30 @@ class NinebotOptionsFlow(OptionsFlow):
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         """Manage the options."""
+        errors: dict[str, str] = {}
         if user_input is not None:
-            return self.async_create_entry(title="", data=user_input)
+            # A pairing password belongs with the device rather than the options,
+            # and the protocol layer needs it as 16 raw bytes - so reject anything
+            # that isn't, instead of breaking setup later.
+            password = str(user_input.pop(CONF_V2_PASSWORD, "") or "").replace(" ", "")
+            if password:
+                try:
+                    if len(bytes.fromhex(password)) != 16:
+                        raise ValueError
+                except ValueError:
+                    errors[CONF_V2_PASSWORD] = "invalid_password"
+            if not errors:
+                self.hass.config_entries.async_update_entry(
+                    self.config_entry,
+                    data={**self.config_entry.data, CONF_V2_PASSWORD: password}
+                    if password
+                    else {
+                        k: v
+                        for k, v in self.config_entry.data.items()
+                        if k != CONF_V2_PASSWORD
+                    },
+                )
+                return self.async_create_entry(title="", data=user_input)
 
         current = self.config_entry.options.get(
             CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL
@@ -171,7 +194,16 @@ class NinebotOptionsFlow(OptionsFlow):
                         unit_of_measurement="s",
                         mode=NumberSelectorMode.BOX,
                     )
-                )
+                ),
+                # Newer vehicles that are already linked to the official app will
+                # not accept a new pairing. If you can recover the password the
+                # app uses, this is where it goes.
+                vol.Optional(
+                    CONF_V2_PASSWORD,
+                    default=self.config_entry.data.get(CONF_V2_PASSWORD, ""),
+                ): str,
             }
         )
-        return self.async_show_form(step_id="init", data_schema=schema)
+        return self.async_show_form(
+            step_id="init", data_schema=schema, errors=errors
+        )
