@@ -352,6 +352,13 @@ class NinebotV2Client:
             # Until the user confirms on the vehicle, it may reply "pending" or
             # not reply at all - so a timeout here is expected, not fatal. Keep
             # asking until the deadline, as the official app does.
+            if not self.is_connected:
+                # The vehicle drops the link when it is not going to pair; writing
+                # on regardless only produces a confusing bleak error.
+                raise TimeoutError(
+                    "The vehicle closed the connection during pairing. It is most "
+                    "likely still linked to another client and refusing to pair"
+                )
             try:
                 response = await self._request(
                     BOARD_BLE, CMD_SET_PWD, 0, password, expect=CMD_SET_PWD, timeout=2.5

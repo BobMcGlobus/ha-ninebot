@@ -99,6 +99,24 @@ open the integration, use **Download diagnostics**, and attach the file to an
 issue. It contains what the scooter advertises and which GATT services it exposes
 — that alone shows whether the existing protocol can apply. No coding needed.
 
+### Already paired with the official app?
+
+Newer vehicles refuse to register a second client once the Segway-Ninebot app has
+paired with them — the power button won't help. Two ways round it:
+
+- **Unlink the vehicle from your account** in the app, then pair with Home
+  Assistant (press the power button when prompted), or
+- **Reuse the password the app already uses.** Capture a fresh app pairing with
+  Android's Bluetooth HCI snoop log, then run:
+  ```bash
+  python3 tools/extract_pairing_password.py btsnoop_hci.log --name <SERIAL>
+  ```
+  and paste the result into the integration's **Pairing password** option. The
+  password is recoverable because the key protecting it is derived from the
+  vehicle's own name and a challenge it broadcasts moments earlier. Add `--all`
+  to also print every decrypted frame, which is the easiest way to see which
+  boards and registers a model really uses.
+
 ## Requirements
 
 - Home Assistant **2024.12** or newer with the Bluetooth integration set up
