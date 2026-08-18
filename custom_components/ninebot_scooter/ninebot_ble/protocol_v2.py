@@ -134,6 +134,8 @@ class NinebotV2Client:
         self.generation: str | None = generation
         self._write_chars: list[str] = []
         self._notify_chars: list[str] = []
+        # Replies we received but could not decrypt - see _set_password.
+        self._undecryptable = 0
 
     @property
     def is_connected(self) -> bool:
@@ -347,6 +349,7 @@ class NinebotV2Client:
         password = secrets.token_bytes(16)
         deadline = asyncio.get_running_loop().time() + pair_timeout
         notified = False
+        self._undecryptable = 0
 
         while True:
             # Until the user confirms on the vehicle, it may reply "pending" or
@@ -369,6 +372,17 @@ class NinebotV2Client:
                     return
                 _LOGGER.debug("SET_PWD pending (index %d)", response.index)
             except TimeoutError:
+                if self._undecryptable:
+                    # The vehicle did answer, but encrypted with a key we do not
+                    # have - it is still bound to another client and is talking
+                    # to us with that client's password. Waiting cannot fix this.
+                    raise TimeoutError(
+                        "The vehicle answered the pairing request but encrypted "
+                        "its reply with a key we do not have, so it is still "
+                        "bound to another client. Either remove it from your "
+                        "account in the Segway-Ninebot app, or enter the "
+                        "existing pairing password in the integration options"
+                    ) from None
                 _LOGGER.debug("SET_PWD unanswered, still waiting for confirmation")
 
             if not notified and not already_paired and on_wait_for_button is not None:
@@ -497,10 +511,12 @@ class NinebotV2Client:
             if status != 0:
                 # A reply we cannot decrypt is indistinguishable from no reply at
                 # all unless we say so: -2 means the key is wrong, -3 a replay.
-                _LOGGER.warning(
-                    "Discarding a reply we could not decrypt (status %d, %d bytes)",
+                self._undecryptable += 1
+                _LOGGER.debug(
+                    "Reply we could not decrypt (status %d, %d bytes): %s",
                     status,
                     len(raw),
+                    raw.hex().upper(),
                 )
                 continue
             frame = parse_frame(plaintext)
