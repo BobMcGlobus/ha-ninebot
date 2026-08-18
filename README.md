@@ -106,16 +106,27 @@ paired with them — the power button won't help. Two ways round it:
 
 - **Unlink the vehicle from your account** in the app, then pair with Home
   Assistant (press the power button when prompted), or
-- **Reuse the password the app already uses.** Capture a fresh app pairing with
-  Android's Bluetooth HCI snoop log, then run:
+- **Reuse the password the app already uses.** The vehicle stores its pairing
+  password internally, so it is *not* re-sent over Bluetooth on later connections
+  and cannot be read from a normal capture — but the official app keeps its own
+  copy locally, keyed by serial number. Recover it from the app's data and verify
+  it against any BLE capture of the same scooter:
   ```bash
-  python3 tools/extract_pairing_password.py btsnoop_hci.log --name <SERIAL>
+  python3 tools/recover_password_from_app.py APPDATA --capture btsnoop_hci.log --name <SERIAL>
   ```
-  and paste the result into the integration's **Pairing password** option. The
-  password is recoverable because the key protecting it is derived from the
-  vehicle's own name and a challenge it broadcasts moments earlier. Add `--all`
-  to also print every decrypted frame, which is the easiest way to see which
-  boards and registers a model really uses.
+  `APPDATA` can be an `adb backup` file, the app's shared-prefs XML / database, or
+  an iOS `com.ninebot.segway.plist`. Paste the printed password into the
+  integration's **Pairing password** option.
+
+  (If you *can* capture a genuinely fresh app pairing — remove the vehicle in the
+  app, then add it back while recording — `tools/extract_pairing_password.py
+  btsnoop_hci.log --name <SERIAL>` reads the password straight out of that
+  capture. This only works during a first-time pairing, not a reconnect.)
+
+> ⚠️ Note: on many models the stored password survives even a button-combo factory
+> reset and an account change — it appears to be held in the vehicle's controller
+> and on Segway's servers. In that case only the app-data route above, or a
+> hardware (ST-Link) dump, can recover it.
 
 ## Requirements
 
