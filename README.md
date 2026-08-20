@@ -1,20 +1,25 @@
 # Ninebot Scooter — Home Assistant integration
 
-A local, Bluetooth-LE integration for **Segway / Ninebot** kick-scooters
-(Max G30 / G30D, ES, E, F series). No cloud account, no MQTT, no bridge — Home
-Assistant talks to the scooter directly over BLE (through the local adapter or
-any connectable ESPHome Bluetooth proxy).
+A local, Bluetooth-LE integration for **Segway / Ninebot** kick-scooters. No
+cloud account, no MQTT, no bridge — Home Assistant talks to the scooter directly
+over BLE (through the local adapter or any connectable ESPHome Bluetooth proxy).
 
-> **Status: beta.** Built as a packaged, HACS-installable, self-contained fork of
+Both protocol generations are implemented: the classic one used by the MAX G30 and
+its relatives, and the newer AES-encrypted one used by models such as the Max G3.
+See [Model support](#model-support) for what is confirmed on real hardware, and
+[the account lock](#newer-models-and-the-account-lock) if a newer scooter refuses
+to pair.
+
+> **Status: beta.** Sensors and controls are confirmed working on a **MAX G30D**.
+> Started as a packaged, HACS-installable fork of
 > [ownbee/ninebot-integration](https://github.com/ownbee/ninebot-integration) +
 > [ownbee/ninebot-ble](https://github.com/ownbee/ninebot-ble), with the protocol
 > library and its `miauth` crypto **vendored in** so nothing is pip-installed at
-> runtime. The upstream author only verified the **F-series**; **G30/G30D support
-> is expected but not yet confirmed on real hardware** — testing welcome.
+> runtime.
 
 ## What you get
 
-Read-only sensors, polled while the scooter is awake and in range:
+Sensors, polled while the scooter is awake and in range:
 
 - **Battery**: charge %, voltage, current, two temperatures, health, capacity,
   remaining mAh, BMS serial & firmware
@@ -69,64 +74,89 @@ is read back and an error is raised if the scooter did not accept it.
 
 ## Model support
 
-> ⚠️ **Only the Ninebot MAX G30 / G30D is confirmed working.** Everything else is
-> **under active development and will probably not work yet.** If you have another
-> model, reports are very welcome — please attach the diagnostics download.
-
 | Model | Protocol | Status |
 |---|---|---|
-| MAX G30 / G30D | legacy | ✅ Confirmed working (sensors + controls) |
+| MAX G30 / G30D | legacy | ✅ Confirmed working — sensors + controls |
 | E / ES / F series | legacy | Likely to work — untested |
-| **Max G3, G2, F2, E-series** | Encryption2 | 🚧 In development — sensors only, **untested on hardware** |
+| **Max G3 / G3 Plus** | Encryption2 | ⚠️ Protocol confirmed working on hardware, but blocked if the scooter is bound to a Segway account — see below |
+| G2, F2, E-series | Encryption2 | Untested — reports welcome |
 
-**Works on every model, regardless of protocol:** presence (**In range**),
+**Works on every model, whatever the protocol:** presence (**In range**),
 **Signal strength** and **Last seen**. These come from the Bluetooth
 advertisement, so they need no connection, no pairing and no supported protocol —
-useful on its own for knowing when the scooter arrives, leaves, or is taken.
+useful on their own for knowing when the scooter arrives, leaves, or is moved.
 
-Newer vehicles speak a different, AES-encrypted protocol over their own GATT
-service `6e400001-0000-0000-006e-696e65626f74` ("ninebot" in ASCII). Confusingly
-they *also* advertise the classic Nordic UART service used by older models, but
-never answer on it. The integration detects which protocol a vehicle speaks on the
-first connection, remembers it, and builds the matching entities. Writing
-(controls) is implemented for the legacy protocol only.
+Newer vehicles speak a different, AES-encrypted protocol. Confusingly they expose
+Segway's own GATT service `6e400001-0000-0000-006e-696e65626f74` ("ninebot" in
+ASCII) *and* the classic Nordic UART service — and which one they actually answer
+on varies by model (a Max G3 answers on the classic one). The integration works
+this out on the first connection, remembers it, and builds the matching entities.
+Writes (controls) are implemented for the legacy protocol only.
 
-Pairing a newer vehicle may require pressing its power button once while Home
-Assistant connects; the session key is then stored and reused.
+**If your model doesn't work, the most useful thing you can send** is the
+integration's **Download diagnostics** file, attached to an issue. It records what
+the scooter advertises, which GATT services it exposes, and why the last attempt
+failed — enough to tell whether the protocol can apply. No coding needed.
 
-**If your model doesn't work, this is the most useful thing you can send:**
-open the integration, use **Download diagnostics**, and attach the file to an
-issue. It contains what the scooter advertises and which GATT services it exposes
-— that alone shows whether the existing protocol can apply. No coding needed.
+## Newer models and the account lock
 
-### Already paired with the official app?
+A Max G3 has been confirmed to complete the full encrypted handshake with this
+integration: it answers, its replies decrypt correctly, and its serial number
+reads back. **But if the scooter has ever been paired with the official
+Segway-Ninebot app, that is usually where it stops.**
 
-Newer vehicles refuse to register a second client once the Segway-Ninebot app has
-paired with them — the power button won't help. Two ways round it:
+The vehicle stores a 16-byte pairing password internally and will not register a
+second client while it holds one. It reports `stored password: True`, ignores the
+pairing request, and no amount of pressing the power button changes that.
 
-- **Unlink the vehicle from your account** in the app, then pair with Home
-  Assistant (press the power button when prompted), or
-- **Reuse the password the app already uses.** The vehicle stores its pairing
-  password internally, so it is *not* re-sent over Bluetooth on later connections
-  and cannot be read from a normal capture — but the official app keeps its own
-  copy locally, keyed by serial number. Recover it from the app's data and verify
-  it against any BLE capture of the same scooter:
-  ```bash
-  python3 tools/recover_password_from_app.py APPDATA --capture btsnoop_hci.log --name <SERIAL>
-  ```
-  `APPDATA` can be an `adb backup` file, the app's shared-prefs XML / database, or
-  an iOS `com.ninebot.segway.plist`. Paste the printed password into the
-  integration's **Pairing password** option.
+**Things that do *not* clear it** (all tested on a Max G3):
 
-  (If you *can* capture a genuinely fresh app pairing — remove the vehicle in the
-  app, then add it back while recording — `tools/extract_pairing_password.py
-  btsnoop_hci.log --name <SERIAL>` reads the password straight out of that
-  capture. This only works during a first-time pairing, not a reconnect.)
+- Unlinking the vehicle in the app ("entkoppeln")
+- Deleting the Bluetooth bond on the phone
+- Clearing the Segway app's storage and cache
+- A button-combo factory reset on the scooter itself
+- Registering the scooter to a **different Segway account**
 
-> ⚠️ Note: on many models the stored password survives even a button-combo factory
-> reset and an account change — it appears to be held in the vehicle's controller
-> and on Segway's servers. In that case only the app-data route above, or a
-> hardware (ST-Link) dump, can recover it.
+The password appears to live in the vehicle's controller and on Segway's servers,
+so an owner cannot remove it. A scooter that has **never** been paired with the
+app is unaffected — it will pair with Home Assistant normally after one press of
+the power button.
+
+### Getting in anyway: reuse the app's password
+
+The integration has a **Pairing password** option (under *Configure*). Given the
+password the app itself uses, it skips pairing entirely and authenticates
+directly. Two ways to obtain it, both requiring access to your own devices:
+
+**From the app's local data** — the app keeps its own copy, keyed by serial:
+
+```bash
+python3 tools/recover_password_from_app.py APPDATA --capture btsnoop_hci.log --name <SERIAL>
+```
+
+`APPDATA` can be an iOS `com.ninebot.segway.plist` (key `<SERIAL>_decrypt`), an
+Android shared-prefs XML or database, or an `adb backup` file. Every 16-byte value
+found is **verified against the AUTH handshake** in a Bluetooth capture of the same
+scooter, so the password it prints is proven correct before you use it. Paste the
+result into the **Pairing password** option.
+
+- **iOS is the easy route:** a normal *unencrypted* Finder/iTunes backup contains
+  the plist. No jailbreak needed.
+- **On Android, `adb backup` does not work** — Segway ships the app with
+  `allowBackup=false`, so the backup comes out empty (a 1 KB file of zeros). Root
+  access is needed to read `/data/data/com.ninebot.segway/shared_prefs/`.
+
+**From a first-time pairing capture** — if the scooter has never been paired, or
+you are pairing a fresh one, record it with Android's Bluetooth HCI snoop log and:
+
+```bash
+python3 tools/extract_pairing_password.py btsnoop_hci.log --name <SERIAL>
+```
+
+This reads the password straight out of the exchange. It only works during a
+genuine first pairing: a reconnect never transmits the password. Add `--all` to
+print every decrypted frame, which is also the easiest way to see which boards and
+registers a model really uses.
 
 ## Requirements
 
@@ -150,15 +180,17 @@ or add it manually via **Add Integration → Ninebot Scooter**.
 
 ### First-time pairing
 
-On first connect the scooter registers Home Assistant as an authorized device.
-When Home Assistant asks, **press the power button on the scooter once** to
-confirm. No key extraction and no cloud login are required — the app-side key is
-generated locally per session.
+On first connect the scooter registers Home Assistant as an authorised client.
+When Home Assistant asks — a notification appears in the UI — **press the power
+button on the scooter once** to confirm. The key is generated locally and then
+stored, so this is a one-time step; no cloud login is involved.
 
-> Note: Ninebot scooters typically remember a single paired controller key.
-> Depending on firmware, pairing Home Assistant may re-register the scooter and
-> require you to re-pair the official Segway-Ninebot app afterwards (and vice
-> versa).
+> Notes:
+> - Ninebot scooters remember a single paired client. Pairing Home Assistant may
+>   require you to re-pair the official Segway-Ninebot app afterwards, and vice
+>   versa.
+> - On **newer models already paired with the app**, the button press cannot work
+>   at all — see [the account lock](#newer-models-and-the-account-lock).
 
 ## Credits
 
