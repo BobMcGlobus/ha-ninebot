@@ -6,6 +6,13 @@ __pycache__/
 .ruff_cache/
 .pytest_cache/
 
+# Captures, dumps and scratch binaries from protocol work - these can contain
+# device secrets and are never part of the integration.
+*.bin
+*.ab
+btsnoop*
+*.plist
+
 # Reverse-engineering / de-risk scripts (may contain device secrets)
 probe.py
 raw_dump.py

@@ -110,6 +110,9 @@ Not every register holds a live measurement, and this varies by model:
   voltage condition flags.
 - **Power** is computed from battery voltage × current rather than read from a
   register, so it goes negative while charging.
+- **Bluetooth pairing code** is not the pairing password. It is a six-byte field
+  that reads as zeros on both a G30D and an F40, and is far too short to hold the
+  16-byte key — so it cannot be used to back up your pairing.
 
 **If your model doesn't work, the most useful thing you can send** is the
 integration's **Download diagnostics** file, attached to an issue. It records what
