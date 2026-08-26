@@ -77,7 +77,8 @@ is read back and an error is raised if the scooter did not accept it.
 | Model | Protocol | Status |
 |---|---|---|
 | MAX G30 / G30D | legacy | ✅ Confirmed working — sensors + controls |
-| E / ES / F series | legacy | Likely to work — untested |
+| **Ninebot F40** | legacy | ✅ Confirmed working — sensors, paired first try |
+| E / ES / other F series | legacy | Likely to work — untested |
 | **Max G3 / G3 Plus** | Encryption2 | ⚠️ Protocol confirmed working on hardware, but blocked if the scooter is bound to a Segway account — see below |
 | G2, F2, E-series | Encryption2 | Untested — reports welcome |
 
@@ -92,6 +93,23 @@ ASCII) *and* the classic Nordic UART service — and which one they actually ans
 on varies by model (a Max G3 answers on the classic one). The integration works
 this out on the first connection, remembers it, and builds the matching entities.
 Writes (controls) are implemented for the legacy protocol only.
+
+### What some sensors really mean
+
+Not every register holds a live measurement, and this varies by model:
+
+- **Battery health** and **Battery factory capacity** are nominal values on at
+  least the F40 — health reads a flat 100 % and factory capacity equals the pack's
+  rated capacity. Do not read them as a measured state of health.
+- **BMS-side registers read zero on some models** (BMS serial and firmware,
+  balancing status, overflow/over-discharge counters). The F40 reports zeros
+  throughout; the G30D reports real values.
+- **Tail light** reads a bitfield rather than a plain 0/1 on some models (512 on
+  the F40, 1 on the G30D), so the switch treats any non-zero value as "on".
+- There are no per-cell voltages in this protocol — only the cell under/over
+  voltage condition flags.
+- **Power** is computed from battery voltage × current rather than read from a
+  register, so it goes negative while charging.
 
 **If your model doesn't work, the most useful thing you can send** is the
 integration's **Download diagnostics** file, attached to an issue. It records what

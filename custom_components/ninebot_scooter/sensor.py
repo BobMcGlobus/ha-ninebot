@@ -153,6 +153,8 @@ async def async_setup_entry(
     entities: list[SensorEntity] = [
         NinebotSensor(coordinator, description) for description in descriptions
     ]
+    if coordinator.protocol != PROTOCOL_V2:
+        entities.append(NinebotPowerSensor(coordinator))
     entities.append(NinebotLastUpdateSensor(coordinator))
     # Advertisement-based, so these work even on models we cannot talk to yet.
     entities.append(NinebotSignalSensor(coordinator))
@@ -279,3 +281,35 @@ class NinebotLastSeenSensor(NinebotEntity, RestoreSensor):
     @property
     def native_value(self) -> datetime | None:
         return self.coordinator.last_seen or self._restored
+
+
+class NinebotPowerSensor(NinebotEntity, SensorEntity):
+    """Power drawn from the battery, computed as voltage x current.
+
+    Replaces a register that shared its index with the trip timer and therefore
+    reported trip seconds as watts. Voltage and current are both read reliably, so
+    deriving the figure is both simpler and verifiably right - and it goes
+    negative while charging, which the register never did.
+    """
+
+    _attr_name = "Power"
+    _attr_device_class = SensorDeviceClass.POWER
+    _attr_native_unit_of_measurement = "W"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, coordinator: NinebotCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{coordinator.address}_power"
+
+    @property
+    def native_value(self) -> float | None:
+        data = self.coordinator.data or {}
+        volts = data.get(str(BmsIdx.BAT_VOLTAGE_CUR))
+        amps = data.get(str(BmsIdx.BAT_CURRENT_CUR))
+        if volts is None or amps is None:
+            return None
+        return round(float(volts) * float(amps), 1)
+
+    @property
+    def available(self) -> bool:
+        return self.native_value is not None

@@ -47,7 +47,6 @@ class CtrlIdx(StrEnum):
     NB_CTL_TAIL_LIGHT = "Tail light on"
     NB_SINGLE_MIL = "Single mileage"
     NB_SINGLE_RUN_TIM = "Single operation time"
-    NB_POWER = "Scooter power"
 
 
 class BmsIdx(StrEnum):
@@ -216,12 +215,15 @@ _CTRL_TABLE: dict[CtrlIdx, RegDesc[Any]] = {
         device_class=SensorDeviceClass.DISTANCE,
         unit=Units.LENGTH_KILOMETERS,
     ),
+    # Seconds, like NB_INF_RID_TIM below - not thousandths. The /1000 here was
+    # copied from the mileage scaler above; it made two different scooters report
+    # 128 and 46 days of continuous power-on against ~118 and ~66 hours ridden.
     CtrlIdx.NB_INF_RUN_TIM: RegDesc(
         0x32,
         2,
         2,
         _unpack_U32_from2LE16,
-        scaler=lambda x: round(x / 1000, 1),
+        scaler=lambda x: round(x / 3600, 1),
         device_class=SensorDeviceClass.DURATION,
         unit=Units.TIME_HOURS,
     ),
@@ -262,7 +264,8 @@ _CTRL_TABLE: dict[CtrlIdx, RegDesc[Any]] = {
     ),
     # Unlike the neighbouring speed registers (tenths of km/h), this one stores
     # thousandths: a G30D limited to 20 km/h reads 20000 here, which the original
-    # /10 scaling reported as an absurd "2000 km/h".
+    # /10 scaling reported as an absurd "2000 km/h". Measured on hardware, so the
+    # odd-looking /1000 is deliberate - do not "fix" it to match its neighbours.
     CtrlIdx.NB_CTL_NOMALSPEED: RegDesc(
         0x73, 1, 2, _unpack_LES16, scaler=lambda x: x / 1000, unit=Units.SPEED_KILOMETERS_PER_HOUR
     ),
@@ -290,13 +293,6 @@ _CTRL_TABLE: dict[CtrlIdx, RegDesc[Any]] = {
         scaler=lambda x: round(x / 3600, 1),
         device_class=SensorDeviceClass.DURATION,
         unit=Units.TIME_HOURS,
-    ),
-    CtrlIdx.NB_POWER: RegDesc(
-        0xBA,
-        1,
-        2,
-        _unpack_LE16,
-        unit=Units.POWER_WATT,
     ),
 }
 
