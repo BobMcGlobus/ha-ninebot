@@ -39,8 +39,11 @@ DEFAULT_POLL_INTERVAL = 30  # seconds
 CONF_POLL_TIMEOUT = "poll_timeout"
 # How long a single poll may run before it is given up. It has to be bounded:
 # an attempt started while the scooter is riding past a proxy would otherwise
-# sit in the Bluetooth retries and block every later sighting.
-DEFAULT_POLL_TIMEOUT = 15  # seconds
+# sit in the Bluetooth retries and block every later sighting. 45 s leaves room
+# for a full 45-register read, which was measured at ~20 s over a proxy - and
+# the scooter keeps advertising for ~18 minutes after being parked, so giving up
+# early costs more than waiting does.
+DEFAULT_POLL_TIMEOUT = 45  # seconds
 MIN_POLL_TIMEOUT = 10
 MAX_POLL_TIMEOUT = 120
 MIN_POLL_INTERVAL = 10
