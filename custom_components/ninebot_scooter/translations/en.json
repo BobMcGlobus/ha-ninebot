@@ -25,11 +25,13 @@
         "title": "Ninebot options",
         "data": {
           "poll_interval": "Polling interval (seconds)",
-          "v2_password": "Pairing password (hex, optional)"
+          "v2_password": "Pairing password (hex, optional)",
+          "poll_timeout": "Poll timeout (seconds)"
         },
         "data_description": {
           "poll_interval": "How often to connect and read the scooter while it is awake. Lower is more responsive but uses more Bluetooth airtime and battery.",
-          "v2_password": "Only needed for newer models that are already linked to the official Segway-Ninebot app and therefore refuse a new pairing. 32 hex characters. Leave empty otherwise."
+          "v2_password": "Only needed for newer models that are already linked to the official Segway-Ninebot app and therefore refuse a new pairing. 32 hex characters. Leave empty otherwise.",
+          "poll_timeout": "How long a single reading may take before it is given up. A reading that started while the scooter was riding past would otherwise block the next one. Raise this if polls time out while the scooter is parked and in range."
         }
       }
     },

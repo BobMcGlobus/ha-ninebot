@@ -28,11 +28,13 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     CONF_POLL_INTERVAL,
+    CONF_POLL_TIMEOUT,
     CONF_PROTOCOL,
     CONF_V2_BOARD,
     CONF_V2_GENERATION,
     CONF_V2_PASSWORD,
     DEFAULT_POLL_INTERVAL,
+    DEFAULT_POLL_TIMEOUT,
     PROTOCOL_LEGACY,
     PROTOCOL_V2,
 )
@@ -49,13 +51,6 @@ from .ninebot_ble.serial_parser import SerialParser
 _LOGGER = logging.getLogger(__name__)
 
 _T = TypeVar("_T")
-
-# A poll started while the scooter is moving past a proxy can sit in
-# establish_connection's retries long after the vehicle is out of range. Nothing
-# bounded that, and while it ran every later advertisement was dropped as an
-# overlapping poll - including the one from where the scooter finally stops,
-# which is exactly where the connection would have worked.
-_MAX_POLL_SECONDS = 45.0
 
 # Treat a signal this much stronger than at the last attempt as "it has arrived
 # and parked", and poll even inside the throttle window.
@@ -120,6 +115,9 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         self._min_interval: float = float(
             entry.options.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL)
+        )
+        self._poll_timeout: float = float(
+            entry.options.get(CONF_POLL_TIMEOUT, DEFAULT_POLL_TIMEOUT)
         )
         self._lock = asyncio.Lock()
         self._last_success = 0.0  # monotonic time of last SUCCESSFUL poll
@@ -241,7 +239,7 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def _run_poll(self) -> None:
         """Refresh, but never hold the poll slot indefinitely."""
         try:
-            async with asyncio.timeout(_MAX_POLL_SECONDS):
+            async with asyncio.timeout(self._poll_timeout):
                 await self.async_refresh()
         except asyncio.CancelledError:
             # Superseded by a closer sighting, not a fault of the vehicle.
@@ -249,10 +247,16 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except TimeoutError:
             self._failures += 1
             self.last_error = (
-                f"Poll gave up after {_MAX_POLL_SECONDS:.0f}s - the scooter was "
-                "probably out of range again before it finished"
+                f"Poll gave up after {self._poll_timeout:.0f}s - either the "
+                "scooter went out of range, or it needs longer than this to "
+                "answer and the timeout should be raised under Configure"
             )
-            _LOGGER.debug("Poll of %s timed out after %.0fs", self.address, _MAX_POLL_SECONDS)
+            _LOGGER.warning(
+                "Poll of %s timed out after %.0fs. If this repeats while the "
+                "scooter is parked and in range, raise the poll timeout.",
+                self.address,
+                self._poll_timeout,
+            )
 
     @callback
     def _async_on_unavailable(self, service_info: BluetoothServiceInfoBleak) -> None:

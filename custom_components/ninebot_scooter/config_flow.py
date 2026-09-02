@@ -25,11 +25,15 @@ from homeassistant.helpers.selector import (
 
 from .const import (
     CONF_POLL_INTERVAL,
+    CONF_POLL_TIMEOUT,
     CONF_V2_PASSWORD,
     DEFAULT_POLL_INTERVAL,
+    DEFAULT_POLL_TIMEOUT,
     DOMAIN,
     MAX_POLL_INTERVAL,
+    MAX_POLL_TIMEOUT,
     MIN_POLL_INTERVAL,
+    MIN_POLL_TIMEOUT,
 )
 
 # Older Ninebot scooters (E/MAX/F series) advertise with this manufacturer id.
@@ -184,12 +188,29 @@ class NinebotOptionsFlow(OptionsFlow):
         current = self.config_entry.options.get(
             CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL
         )
+        current_timeout = self.config_entry.options.get(
+            CONF_POLL_TIMEOUT, DEFAULT_POLL_TIMEOUT
+        )
         schema = vol.Schema(
             {
                 vol.Required(CONF_POLL_INTERVAL, default=current): NumberSelector(
                     NumberSelectorConfig(
                         min=MIN_POLL_INTERVAL,
                         max=MAX_POLL_INTERVAL,
+                        step=5,
+                        unit_of_measurement="s",
+                        mode=NumberSelectorMode.BOX,
+                    )
+                ),
+                # Bounds how long one poll may run. Too low cuts off a reading
+                # that would have completed; too high lets an attempt started
+                # out of range block the sightings that follow it.
+                vol.Required(
+                    CONF_POLL_TIMEOUT, default=current_timeout
+                ): NumberSelector(
+                    NumberSelectorConfig(
+                        min=MIN_POLL_TIMEOUT,
+                        max=MAX_POLL_TIMEOUT,
                         step=5,
                         unit_of_measurement="s",
                         mode=NumberSelectorMode.BOX,

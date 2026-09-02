@@ -35,5 +35,13 @@ PROTOCOL_V2 = "v2"  # Max G3, G2, E-series mopeds - under active development
 # Options
 CONF_POLL_INTERVAL = "poll_interval"
 DEFAULT_POLL_INTERVAL = 30  # seconds
+
+CONF_POLL_TIMEOUT = "poll_timeout"
+# How long a single poll may run before it is given up. It has to be bounded:
+# an attempt started while the scooter is riding past a proxy would otherwise
+# sit in the Bluetooth retries and block every later sighting.
+DEFAULT_POLL_TIMEOUT = 15  # seconds
+MIN_POLL_TIMEOUT = 10
+MAX_POLL_TIMEOUT = 120
 MIN_POLL_INTERVAL = 10
 MAX_POLL_INTERVAL = 3600
