@@ -610,6 +610,32 @@ V2_VCU_REGISTERS: tuple[V2Register, ...] = (
         device_class="distance",
         primary=True,
     ),
+    # Both counters below tick once per second while the vehicle is AWAKE, not
+    # by wall clock: confirmed exactly, +5040 on each over 5040 s of a charge
+    # with the scooter continuously awake. An earlier reading that seemed to rule
+    # this out (+9 over 161 s) was taken across a sleep, where the vehicle only
+    # counted the seconds it spent serving the two polls.
+    V2Register(
+        key="Awake time",
+        index=0x64,
+        length=4,
+        unpack=_u32,
+        scale=1 / 3600,
+        unit="h",
+        device_class="duration",
+    ),
+    # Advances only while the wheels turn: unchanged across 84 minutes of awake
+    # charging, while the two counters above ticked every second. 3097 s over
+    # 25.1 km is a 29.2 km/h moving average, against 27.8 km/h lifetime.
+    V2Register(
+        key="Riding time",
+        index=0x66,
+        length=4,
+        unpack=_u32,
+        scale=1 / 3600,
+        unit="h",
+        device_class="duration",
+    ),
     V2Register(
         key="Temperature",
         index=0x6B,

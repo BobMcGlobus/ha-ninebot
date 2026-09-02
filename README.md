@@ -80,7 +80,7 @@ is read back and an error is raised if the scooter did not accept it.
 | MAX G30 / G30D | legacy | ✅ Confirmed working — sensors + controls |
 | **Ninebot F40** | legacy | ✅ Confirmed working — sensors, paired first try |
 | E / ES / other F series | legacy | Likely to work — untested |
-| **Max G3 / G3 Plus** | Encryption2 | ✅ Confirmed working — battery, odometer, remaining range, temperature; needs the app's pairing password if already paired ([see below](#newer-models-and-the-account-lock)) |
+| **Max G3 / G3 Plus** | Encryption2 | ✅ Confirmed working — battery, odometer, remaining range, temperature, awake & riding time; needs the app's pairing password if already paired ([see below](#newer-models-and-the-account-lock)) |
 | G2, F2, F65, E-series | Encryption2 | Untested — reports welcome |
 
 **Works on every model, whatever the protocol:** presence (**In range**),
@@ -94,10 +94,13 @@ useful on their own for knowing when the scooter arrives, leaves, or is moved.
 > it is not a heartbeat. If you need "has this thing been heard recently", use
 > **Last seen** or **Last updated**, which carry an actual timestamp.
 
-> **Charging does not necessarily wake the Bluetooth stack.** On a Max G3, 92
-> minutes of charging produced no advertisement at all, so the integration never
-> got a chance to connect. Do not count on watching the charge from Home
-> Assistant on that model.
+> **Another Bluetooth central can lock the integration out.** A phone with the
+> Segway app connected holds the link, and the integration then sees nothing at
+> all — no advertisement, no error, just silence. If polling stops working while
+> the scooter is plainly awake, close the official app fully rather than leaving
+> it in the background. (An earlier version of this file claimed charging does
+> not wake the Bluetooth stack. That was wrong: a Max G3 has since been polled
+> every minute across a full 84-minute charge without a single failure.)
 
 Newer vehicles speak a different, AES-encrypted protocol. Which GATT service they
 use varies: some expose Segway's own `6e400001-0000-0000-006e-696e65626f74`
@@ -125,8 +128,10 @@ Not every register holds a live measurement, and this varies by model:
   voltage condition flags.
 - **Power** is computed from battery voltage × current rather than read from a
   register, so it goes negative while charging.
-- **On a Max G3, four registers are mapped so far**: battery, total mileage,
-  remaining range and temperature. Each was confirmed by predicting the value
+- **On a Max G3, six registers are mapped so far**: battery, total mileage,
+  remaining range, temperature, and two lifetime counters — **Awake time**
+  (seconds the vehicle has spent powered on, not wall clock) and **Riding time**
+  (advances only while the wheels turn). Each was confirmed by predicting the value
   from the scooter's own display *before* reading the register. Register indexes
   are per board and differ by vehicle class: the E-series keeps its data on the
   dashboard, kick scooters on the VCU. Until v0.11.0 the integration read

@@ -63,6 +63,12 @@ _DIAGNOSTIC_ENABLED_KEYS: frozenset[str] = frozenset(
 )
 
 
+# Lifetime counters on the newer protocol -> total_increasing for statistics.
+_V2_TOTAL_KEYS: frozenset[str] = frozenset(
+    {"Total mileage", "Awake time", "Riding time"}
+)
+
+
 @dataclass(frozen=True, kw_only=True)
 class NinebotSensorEntityDescription(SensorEntityDescription):
     """Sensor description carrying the register key to read from coordinator data."""
@@ -135,7 +141,7 @@ def _build_v2_descriptions(board: int) -> list[NinebotSensorEntityDescription]:
                 native_unit_of_measurement=reg.unit,
                 state_class=(
                     SensorStateClass.TOTAL_INCREASING
-                    if reg.key == "Total mileage"
+                    if reg.key in _V2_TOTAL_KEYS
                     else SensorStateClass.MEASUREMENT
                     if reg.unit
                     else None
