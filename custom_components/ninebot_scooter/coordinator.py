@@ -50,6 +50,22 @@ _LOGGER = logging.getLogger(__name__)
 
 _T = TypeVar("_T")
 
+# A poll started while the scooter is moving past a proxy can sit in
+# establish_connection's retries long after the vehicle is out of range. Nothing
+# bounded that, and while it ran every later advertisement was dropped as an
+# overlapping poll - including the one from where the scooter finally stops,
+# which is exactly where the connection would have worked.
+_MAX_POLL_SECONDS = 45.0
+
+# Treat a signal this much stronger than at the last attempt as "it has arrived
+# and parked", and poll even inside the throttle window.
+_ARRIVAL_RSSI_GAIN = 12
+
+# How long an in-flight poll must have been running before a much better
+# signal is allowed to cancel it. Short enough to catch the scooter before it
+# is switched off, long enough that a healthy poll finishes undisturbed.
+_STALLED_POLL_SECONDS = 8.0
+
 # The scooter is often only awake for a minute or two, and reading every register
 # takes ~45 round trips - if the session ends early, whatever is read last is
 # lost. Read the registers people actually care about first; the battery lives at
@@ -108,6 +124,8 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._lock = asyncio.Lock()
         self._last_success = 0.0  # monotonic time of last SUCCESSFUL poll
         self._failures = 0  # consecutive failures, used to back off
+        self._last_attempt = 0.0  # monotonic time of the last poll ATTEMPT
+        self._last_attempt_rssi: int | None = None  # signal at the last poll
         self._v2_board: int | None = entry.data.get(CONF_V2_BOARD)
         self._button_notification_id = f"ninebot_pair_{entry.entry_id}"
         self._poll_task: asyncio.Task | None = None
@@ -176,20 +194,65 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.last_seen = dt_util.utcnow()
         self.async_update_listeners()
 
-        # Don't overlap an in-flight poll.
-        if self._poll_task is not None and not self._poll_task.done():
-            return
-        # Throttle by time since last SUCCESS. Failed polls are NOT throttled, so
-        # the next advertisement retries immediately - important because the
-        # scooter is often only awake for a short window (arriving/leaving).
-        # After repeated failures back off, so a vehicle we cannot talk to at all
-        # does not occupy the Bluetooth adapter continuously.
-        interval = self._min_interval * min(2**self._failures, 20)
-        if time.monotonic() - self._last_success < interval:
-            return
-        self._poll_task = self.hass.async_create_task(
-            self.async_refresh(), "ninebot_scooter poll", eager_start=False
+        # A big jump in signal means the scooter has come closer and stopped -
+        # riding past a proxy and then parking next to one looks exactly like
+        # this, and it is the best moment to read it. So it beats both the
+        # throttle and an attempt still limping along from further away.
+        arrived = (
+            self._last_attempt_rssi is not None
+            and service_info.rssi - self._last_attempt_rssi >= _ARRIVAL_RSSI_GAIN
         )
+
+        running = self._poll_task is not None and not self._poll_task.done()
+        if running:
+            stalled = time.monotonic() - self._last_attempt >= _STALLED_POLL_SECONDS
+            if not (arrived and stalled):
+                return
+            # Started while the scooter was out of reach and still has not
+            # finished; the signal we have now is far better than the one it is
+            # struggling with. Drop it and read from where we actually are.
+            _LOGGER.debug(
+                "Cancelling stalled poll of %s: signal improved %d -> %d dBm",
+                self.address,
+                self._last_attempt_rssi,
+                service_info.rssi,
+            )
+            self._poll_task.cancel()
+
+        # Throttle by time since the last SUCCESS, so a good poll is not repeated
+        # needlessly. After failures back off from the last ATTEMPT instead:
+        # measuring the backoff from a success that may be hours old left the
+        # gate permanently open and hammered the adapter.
+        if self._failures:
+            interval = min(self._min_interval * 2**self._failures, self._min_interval * 20)
+            since = time.monotonic() - self._last_attempt
+        else:
+            interval = self._min_interval
+            since = time.monotonic() - self._last_success
+        if since < interval and not arrived:
+            return
+
+        self._last_attempt = time.monotonic()
+        self._last_attempt_rssi = service_info.rssi
+        self._poll_task = self.hass.async_create_task(
+            self._run_poll(), "ninebot_scooter poll", eager_start=False
+        )
+
+    async def _run_poll(self) -> None:
+        """Refresh, but never hold the poll slot indefinitely."""
+        try:
+            async with asyncio.timeout(_MAX_POLL_SECONDS):
+                await self.async_refresh()
+        except asyncio.CancelledError:
+            # Superseded by a closer sighting, not a fault of the vehicle.
+            raise
+        except TimeoutError:
+            self._failures += 1
+            self.last_error = (
+                f"Poll gave up after {_MAX_POLL_SECONDS:.0f}s - the scooter was "
+                "probably out of range again before it finished"
+            )
+            _LOGGER.debug("Poll of %s timed out after %.0fs", self.address, _MAX_POLL_SECONDS)
 
     @callback
     def _async_on_unavailable(self, service_info: BluetoothServiceInfoBleak) -> None:
@@ -197,6 +260,10 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         _LOGGER.debug("Scooter %s no longer seen over Bluetooth", self.address)
         self.in_range = False
         self.rssi = None
+        # Failures while it was riding out of range say nothing about the next
+        # time it turns up. Clear the backoff so arriving home polls at once.
+        self._failures = 0
+        self._last_attempt_rssi = None
         self.async_update_listeners()
 
     # -- BLE session --------------------------------------------------------------
