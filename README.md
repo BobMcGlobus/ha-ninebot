@@ -10,7 +10,8 @@ See [Model support](#model-support) for what is confirmed on real hardware, and
 [the account lock](#newer-models-and-the-account-lock) if a newer scooter refuses
 to pair.
 
-> **Status: beta.** Sensors and controls are confirmed working on a **MAX G30D**.
+> **Status: beta.** Sensors and controls are confirmed working on a **MAX G30D**;
+> sensors on an **F40** and a **Max G3**.
 > Started as a packaged, HACS-installable fork of
 > [ownbee/ninebot-integration](https://github.com/ownbee/ninebot-integration) +
 > [ownbee/ninebot-ble](https://github.com/ownbee/ninebot-ble), with the protocol
@@ -79,7 +80,7 @@ is read back and an error is raised if the scooter did not accept it.
 | MAX G30 / G30D | legacy | ✅ Confirmed working — sensors + controls |
 | **Ninebot F40** | legacy | ✅ Confirmed working — sensors, paired first try |
 | E / ES / other F series | legacy | Likely to work — untested |
-| **Max G3 / G3 Plus** | Encryption2 | ⚠️ Protocol confirmed working on hardware, but blocked if the scooter is bound to a Segway account — see below |
+| **Max G3 / G3 Plus** | Encryption2 | ✅ Confirmed working — battery & pack voltage; needs the app's pairing password if already paired ([see below](#newer-models-and-the-account-lock)) |
 | G2, F2, E-series | Encryption2 | Untested — reports welcome |
 
 **Works on every model, whatever the protocol:** presence (**In range**),
@@ -110,6 +111,13 @@ Not every register holds a live measurement, and this varies by model:
   voltage condition flags.
 - **Power** is computed from battery voltage × current rather than read from a
   register, so it goes negative while charging.
+- **On a Max G3 only battery and pack voltage are mapped so far.** Register
+  indexes are per board and differ by vehicle class: the E-series keeps its data
+  on the dashboard, kick scooters on the VCU. Until v0.11.0 the integration read
+  dashboard indexes out of a G3's VCU, which is why it reported a range of
+  1924.9 km and a speed of 1387.5 km/h — those were ASCII characters of the
+  vehicle identifier. The remaining G3 registers are not guessed at; see
+  [issue #5](https://github.com/BobMcGlobus/ha-ninebot/issues/5) to help map them.
 - **Bluetooth pairing code** is not the pairing password. It is a six-byte field
   that reads as zeros on both a G30D and an F40, and is far too short to hold the
   16-byte key — so it cannot be used to back up your pairing.
@@ -121,16 +129,20 @@ failed — enough to tell whether the protocol can apply. No coding needed.
 
 ## Newer models and the account lock
 
-A Max G3 has been confirmed to complete the full encrypted handshake with this
-integration: it answers, its replies decrypt correctly, and its serial number
-reads back. **But if the scooter has ever been paired with the official
-Segway-Ninebot app, that is usually where it stops.**
+A Max G3 is confirmed working with this integration: it completes the encrypted
+handshake, authenticates, and its registers read back correctly.
 
-The vehicle stores a 16-byte pairing password internally and will not register a
-second client while it holds one. It reports `stored password: True`, ignores the
-pairing request, and no amount of pressing the power button changes that.
+**Up to and including v0.10.0 this looked like an account lock, and that diagnosis
+was wrong.** Every frame larger than 20 bytes was being split across two Bluetooth
+writes, and the vehicle discards a frame it receives in fragments. `PRE_COMM`
+(13 bytes) fitted and always worked; `AUTH` (27) and `SET_PWD` (29) did not and
+were dropped without a reply. That looked identical to a vehicle refusing to
+pair. Fixed in v0.11.0 — see
+[issue #4](https://github.com/BobMcGlobus/ha-ninebot/issues/4).
 
-**Things that do *not* clear it** (all tested on a Max G3):
+What is still true: a vehicle that has been paired with the official app reports
+`stored password: True`, and the following do **not** clear that flag (all tested
+on a Max G3):
 
 - Unlinking the vehicle in the app ("entkoppeln")
 - Deleting the Bluetooth bond on the phone
@@ -138,10 +150,11 @@ pairing request, and no amount of pressing the power button changes that.
 - A button-combo factory reset on the scooter itself
 - Registering the scooter to a **different Segway account**
 
-The password appears to live in the vehicle's controller and on Segway's servers,
-so an owner cannot remove it. A scooter that has **never** been paired with the
-app is unaffected — it will pair with Home Assistant normally after one press of
-the power button.
+What is **no longer established**: whether such a vehicle actually refuses a new
+pairing. That was never tested, because our pairing request never arrived intact.
+If your G3 has never been paired with the app, try the normal button-press pairing
+first — and please report the result either way. If it does refuse, the password
+route below works and is confirmed on hardware.
 
 ### Getting in anyway: reuse the app's password
 

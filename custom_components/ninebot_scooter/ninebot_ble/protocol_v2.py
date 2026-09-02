@@ -72,9 +72,6 @@ CMD_PRE_COMM = 0x5B
 CMD_SET_PWD = 0x5C
 CMD_AUTH = 0x5D
 
-# Writes must be split at MTU - 3; 20 bytes is the safe BLE 4.0 default.
-_CHUNK = 20
-_CHUNK_DELAY = 0.01
 
 
 @dataclass(frozen=True)
@@ -460,13 +457,20 @@ class NinebotV2Client:
             len(data),
             "with response" if self._write_with_response else "no response",
         )
-        for offset in range(0, len(data), _CHUNK):
-            chunk = data[offset : offset + _CHUNK]
-            await self.client.write_gatt_char(
-                self._write_uuid, chunk, response=self._write_with_response
-            )
-            if offset + _CHUNK < len(data):
-                await asyncio.sleep(_CHUNK_DELAY)
+        # One protocol frame must go out as a single ATT write. The CBC-MAC covers
+        # the whole frame, so splitting it hands the vehicle two malformed frames
+        # instead of one valid one: it drops both without replying, which looks
+        # exactly like a pairing refusal. That silent failure cost the entire
+        # handshake on every frame over 20 bytes - AUTH (27) and SET_PWD (29) -
+        # while PRE_COMM (13) kept working and made it look model-specific.
+        #
+        # Deliberately not gated on client.mtu_size: on BlueZ that is bleak's
+        # placeholder 23 until the MTU is actually acquired, so gating on it would
+        # reject frames the link accepts. Links that really are too small surface
+        # as a write error or a missing reply, with the size logged above.
+        await self.client.write_gatt_char(
+            self._write_uuid, data, response=self._write_with_response
+        )
 
     def _drain(self) -> None:
         while not self._queue.empty():
@@ -529,8 +533,12 @@ class NinebotV2Client:
 
 
 # --- Register map -----------------------------------------------------------
-# Read from the dashboard board, which stays awake and caches values from boards
-# that are asleep.
+# Register indexes are per board, and the boards differ by vehicle class, so a
+# single flat table cannot work: the E-series keeps its data on the dashboard,
+# kick scooters on the VCU, and the same index means different things on each.
+# Reading dashboard indexes out of a VCU is how "remaining range 1924.9 km" and
+# "current speed 1387.5 km/h" happened - those were the ASCII characters of the
+# vehicle identifier that a G3 keeps at 0x20-0x27.
 
 
 def _u16(data: bytes) -> int:
@@ -543,10 +551,9 @@ def _u32(data: bytes) -> int:
 
 @dataclass(frozen=True, kw_only=True)
 class V2Register:
-    """One readable value on a newer vehicle."""
+    """One readable value on a newer vehicle, on a specific board."""
 
     key: str
-    board: int
     index: int
     length: int
     unpack: Callable[[bytes], Any]
@@ -556,10 +563,37 @@ class V2Register:
     primary: bool = False
 
 
-V2_REGISTERS: tuple[V2Register, ...] = (
+# Kick scooters (Max G3 and relatives). Confirmed against a G3's own display:
+# battery read 89 % while the dashboard showed 89 %, and both voltage registers
+# read 5132 -> 51.32 V, consistent with 89 % on a 13S pack. Everything else in
+# the VCU sweep is still unidentified and deliberately not guessed at here.
+V2_VCU_REGISTERS: tuple[V2Register, ...] = (
     V2Register(
         key="Battery",
-        board=BOARD_DIS,
+        index=0x55,
+        length=2,
+        unpack=_u16,
+        unit="%",
+        device_class="battery",
+        primary=True,
+    ),
+    V2Register(
+        key="Battery voltage",
+        index=0x45,
+        length=2,
+        unpack=_u16,
+        scale=0.01,
+        unit="V",
+        device_class="voltage",
+        primary=True,
+    ),
+)
+
+# E-series mopeds, which proxy values through the dashboard. These indexes come
+# from the protocol documentation and are NOT confirmed on hardware.
+V2_DIS_REGISTERS: tuple[V2Register, ...] = (
+    V2Register(
+        key="Battery",
         index=0xB5,
         length=2,
         unpack=_u16,
@@ -569,7 +603,6 @@ V2_REGISTERS: tuple[V2Register, ...] = (
     ),
     V2Register(
         key="Total mileage",
-        board=BOARD_DIS,
         index=0xB7,
         length=4,
         unpack=_u32,
@@ -580,7 +613,6 @@ V2_REGISTERS: tuple[V2Register, ...] = (
     ),
     V2Register(
         key="Remaining range",
-        board=BOARD_DIS,
         index=0x25,
         length=2,
         unpack=_u16,
@@ -591,7 +623,6 @@ V2_REGISTERS: tuple[V2Register, ...] = (
     ),
     V2Register(
         key="Trip mileage",
-        board=BOARD_DIS,
         index=0xB9,
         length=4,
         unpack=_u32,
@@ -601,7 +632,6 @@ V2_REGISTERS: tuple[V2Register, ...] = (
     ),
     V2Register(
         key="Current speed",
-        board=BOARD_DIS,
         index=0x26,
         length=2,
         unpack=_u16,
@@ -610,7 +640,6 @@ V2_REGISTERS: tuple[V2Register, ...] = (
     ),
     V2Register(
         key="Average speed",
-        board=BOARD_DIS,
         index=0x27,
         length=2,
         unpack=_u16,
@@ -619,7 +648,6 @@ V2_REGISTERS: tuple[V2Register, ...] = (
     ),
     V2Register(
         key="Rated max speed",
-        board=BOARD_DIS,
         index=0x48,
         length=2,
         unpack=_u16,
@@ -628,9 +656,18 @@ V2_REGISTERS: tuple[V2Register, ...] = (
     ),
     V2Register(
         key="Riding mode",
-        board=BOARD_DIS,
         index=0x74,
         length=2,
         unpack=_u16,
     ),
 )
+
+_REGISTERS_BY_BOARD: dict[int, tuple[V2Register, ...]] = {
+    BOARD_VCU: V2_VCU_REGISTERS,
+    BOARD_DIS: V2_DIS_REGISTERS,
+}
+
+
+def registers_for_board(board: int) -> tuple[V2Register, ...]:
+    """Return the register table belonging to a board, VCU being the default."""
+    return _REGISTERS_BY_BOARD.get(board, V2_VCU_REGISTERS)

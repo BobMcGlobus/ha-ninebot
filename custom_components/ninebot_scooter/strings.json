@@ -3,10 +3,10 @@
     "flow_title": "{name}",
     "step": {
       "bluetooth_confirm": {
-        "description": "Do you want to set up {name}?\n\nAfter setup, on the first poll press the power button on the scooter once when asked, to confirm pairing.\n\n⚠️ Only the Ninebot MAX G30/G30D is confirmed working. Support for other models (Max G3, G2, F2, E-series …) is under active development and will probably not work yet — reports and diagnostics are welcome."
+        "description": "Do you want to set up {name}?\n\nAfter setup, on the first poll press the power button on the scooter once when asked, to confirm pairing.\n\n⚠️ Confirmed on hardware: MAX G30/G30D (sensors and controls), F40 and Max G3 (sensors only). A Max G3 already paired with the Segway app needs its pairing password entered under Configure. Other models (G2, F2, E-series …) are under active development and may not work yet — reports and diagnostics are welcome."
       },
       "user": {
-        "description": "Choose the Ninebot scooter to set up.\n{note}\n\n⚠️ Only the Ninebot MAX G30/G30D is confirmed working. Support for other models (Max G3, G2, F2, E-series …) is under active development and will probably not work yet — reports and diagnostics are welcome.",
+        "description": "Choose the Ninebot scooter to set up.\n{note}\n\n⚠️ Confirmed on hardware: MAX G30/G30D (sensors and controls), F40 and Max G3 (sensors only). A Max G3 already paired with the Segway app needs its pairing password entered under Configure. Other models (G2, F2, E-series …) are under active development and may not work yet — reports and diagnostics are welcome.",
         "data": {
           "address": "Bluetooth device"
         }

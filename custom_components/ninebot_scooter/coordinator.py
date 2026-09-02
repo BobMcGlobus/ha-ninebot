@@ -29,6 +29,7 @@ from homeassistant.util import dt as dt_util
 from .const import (
     CONF_POLL_INTERVAL,
     CONF_PROTOCOL,
+    CONF_V2_BOARD,
     CONF_V2_GENERATION,
     CONF_V2_PASSWORD,
     DEFAULT_POLL_INTERVAL,
@@ -40,8 +41,8 @@ from .ninebot_ble.protocol_v2 import (
     BOARD_DIS,
     BOARD_VCU,
     SERVICE_UUID as V2_SERVICE_UUID,
-    V2_REGISTERS,
     NinebotV2Client,
+    registers_for_board,
 )
 from .ninebot_ble.serial_parser import SerialParser
 
@@ -107,7 +108,7 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._lock = asyncio.Lock()
         self._last_success = 0.0  # monotonic time of last SUCCESSFUL poll
         self._failures = 0  # consecutive failures, used to back off
-        self._v2_board: int | None = None
+        self._v2_board: int | None = entry.data.get(CONF_V2_BOARD)
         self._button_notification_id = f"ninebot_pair_{entry.entry_id}"
         self._poll_task: asyncio.Task | None = None
 
@@ -345,6 +346,11 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 return await self._with_v2_client(self._read_all_v2)
             raise
 
+    @property
+    def v2_board(self) -> int | None:
+        """The board this vehicle answers register reads on, once discovered."""
+        return self._v2_board
+
     async def _find_v2_board(self, client: NinebotV2Client) -> int:
         """Work out which board answers register reads on this vehicle.
 
@@ -354,14 +360,21 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """
         if self._v2_board is not None:
             return self._v2_board
-        probe = V2_REGISTERS[0]
+        # Probe each board with a register from its own table. Probing both with
+        # one index proves nothing: a VCU answers a dashboard index quite happily,
+        # it just returns something else entirely.
         for board in (BOARD_VCU, BOARD_DIS):
+            probe = registers_for_board(board)[0]
             try:
-                await client.read_register(board, probe.index, probe.length)
+                raw = await client.read_register(board, probe.index, probe.length)
             except Exception:  # noqa: BLE001 - probing, failure is expected
+                continue
+            if len(raw) < probe.length or not any(raw):
+                # An all-zero read means the index is not populated on this board.
                 continue
             _LOGGER.info("Vehicle answers register reads on board 0x%02X", board)
             self._v2_board = board
+            self._persist({CONF_V2_BOARD: board})
             return board
         # Nothing answered; keep the documented default so the poll still reports
         # a useful failure rather than silently doing nothing.
@@ -374,9 +387,10 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.model = self.model or "Ninebot (newer protocol)"
 
         board = await self._find_v2_board(client)
+        registers = registers_for_board(board)
         data: dict[str, Any] = {}
         failed: list[str] = []
-        for reg in V2_REGISTERS:
+        for reg in registers:
             try:
                 raw = await client.read_register(board, reg.index, reg.length)
             except Exception as err:  # noqa: BLE001 - one bad read must not fail the poll

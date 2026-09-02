@@ -3,10 +3,10 @@
     "flow_title": "{name}",
     "step": {
       "bluetooth_confirm": {
-        "description": "Möchtest du {name} einrichten?\n\nNach der Einrichtung beim ersten Abruf einmal den Power-Knopf am Roller drücken, wenn danach gefragt wird, um das Pairing zu bestätigen.\n\n⚠️ Bestätigt funktionsfähig ist nur der Ninebot MAX G30/G30D. Die Unterstützung weiterer Modelle (Max G3, G2, F2, E-Serie …) wird gerade aktiv entwickelt und funktioniert wahrscheinlich noch nicht — Rückmeldungen und Diagnosedaten sind willkommen."
+        "description": "Möchtest du {name} einrichten?\n\nNach der Einrichtung beim ersten Abruf einmal den Power-Knopf am Roller drücken, wenn danach gefragt wird, um das Pairing zu bestätigen.\n\n⚠️ Auf Hardware bestätigt: MAX G30/G30D (Sensoren und Steuerung), F40 und Max G3 (nur Sensoren). Ein bereits mit der Segway-App gekoppelter Max G3 braucht sein Pairing-Passwort unter „Konfigurieren“. Weitere Modelle (G2, F2, E-Serie …) werden gerade aktiv entwickelt und funktionieren evtl. noch nicht — Rückmeldungen und Diagnosedaten sind willkommen."
       },
       "user": {
-        "description": "Wähle den einzurichtenden Ninebot-Roller aus.\n{note}\n\n⚠️ Bestätigt funktionsfähig ist nur der Ninebot MAX G30/G30D. Die Unterstützung weiterer Modelle (Max G3, G2, F2, E-Serie …) wird gerade aktiv entwickelt und funktioniert wahrscheinlich noch nicht — Rückmeldungen und Diagnosedaten sind willkommen.",
+        "description": "Wähle den einzurichtenden Ninebot-Roller aus.\n{note}\n\n⚠️ Auf Hardware bestätigt: MAX G30/G30D (Sensoren und Steuerung), F40 und Max G3 (nur Sensoren). Ein bereits mit der Segway-App gekoppelter Max G3 braucht sein Pairing-Passwort unter „Konfigurieren“. Weitere Modelle (G2, F2, E-Serie …) werden gerade aktiv entwickelt und funktionieren evtl. noch nicht — Rückmeldungen und Diagnosedaten sind willkommen.",
         "data": {
           "address": "Bluetooth-Gerät"
         }

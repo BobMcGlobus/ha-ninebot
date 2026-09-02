@@ -21,7 +21,7 @@ from .const import DOMAIN, PROTOCOL_V2
 from .coordinator import NinebotCoordinator
 from .entity import NinebotEntity
 from .ninebot_ble import BmsIdx, CtrlIdx, get_register_desc, iter_register
-from .ninebot_ble.protocol_v2 import V2_REGISTERS
+from .ninebot_ble.protocol_v2 import BOARD_VCU, registers_for_board
 
 # Registers exposed as writable controls (switch/select/number) instead of sensors.
 _CONTROL_KEYS: set[str] = {
@@ -112,10 +112,14 @@ def _build_descriptions() -> list[NinebotSensorEntityDescription]:
     return descriptions
 
 
-def _build_v2_descriptions() -> list[NinebotSensorEntityDescription]:
-    """Descriptions for vehicles speaking the newer protocol."""
+def _build_v2_descriptions(board: int) -> list[NinebotSensorEntityDescription]:
+    """Descriptions for vehicles speaking the newer protocol.
+
+    Which registers exist depends on the board the vehicle answers on, so the
+    entity set is built from that board's table rather than a shared one.
+    """
     descriptions: list[NinebotSensorEntityDescription] = []
-    for reg in V2_REGISTERS:
+    for reg in registers_for_board(board):
         descriptions.append(
             NinebotSensorEntityDescription(
                 key=reg.key,
@@ -146,7 +150,9 @@ async def async_setup_entry(
     """Set up the Ninebot sensors."""
     coordinator: NinebotCoordinator = hass.data[DOMAIN][entry.entry_id]
     if coordinator.protocol == PROTOCOL_V2:
-        descriptions = _build_v2_descriptions()
+        # Before the first poll the board is unknown; kick scooters are the
+        # common case and a reload follows once it has actually been probed.
+        descriptions = _build_v2_descriptions(coordinator.v2_board or BOARD_VCU)
     else:
         descriptions = _build_descriptions()
 
