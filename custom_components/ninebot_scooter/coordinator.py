@@ -131,6 +131,7 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._last_success = 0.0  # monotonic time of last SUCCESSFUL poll
         self._failures = 0  # consecutive failures, used to back off
         self._last_attempt = 0.0  # monotonic time of the last poll ATTEMPT
+        self._legacy_worked = False  # the classic protocol has answered here
         self._last_attempt_rssi: int | None = None  # signal at the last poll
         self._v2_board: int | None = entry.data.get(CONF_V2_BOARD)
         self._button_notification_id = f"ninebot_pair_{entry.entry_id}"
@@ -409,21 +410,41 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def _legacy_poll(self) -> dict[str, Any]:
         """Poll over the legacy protocol, switching if the vehicle is a newer one."""
         try:
-            return await self._with_client(self._read_all_legacy)
+            data = await self._with_client(self._read_all_legacy)
         except Exception:
-            # A newer vehicle advertises the classic service but never answers on
-            # it. If we saw its own service during the attempt, switch protocol
-            # and let the reload rebuild the entities to match.
-            if any(
-                uuid.lower() == V2_SERVICE_UUID for uuid in self.gatt_services
-            ) and self.protocol != PROTOCOL_V2:
-                _LOGGER.info(
-                    "%s speaks the newer Ninebot protocol; switching", self.address
-                )
-                self.protocol = PROTOCOL_V2
-                self._persist({CONF_PROTOCOL: PROTOCOL_V2})
-                return await self._with_v2_client(self._read_all_v2)
-            raise
+            if self.protocol == PROTOCOL_V2 or not self._should_try_v2():
+                raise
+            # Try the newer protocol before committing to it: a legacy scooter
+            # having a bad day must not be switched over permanently on the
+            # strength of one failed connection.
+            _LOGGER.info(
+                "%s did not complete the classic handshake; trying the newer "
+                "protocol", self.address
+            )
+            result = await self._with_v2_client(self._read_all_v2)
+            _LOGGER.info("%s speaks the newer Ninebot protocol; switching", self.address)
+            self.protocol = PROTOCOL_V2
+            self._persist({CONF_PROTOCOL: PROTOCOL_V2})
+            return result
+        self._legacy_worked = True
+        return data
+
+    def _should_try_v2(self) -> bool:
+        """Whether a failed legacy attempt is worth retrying as a newer vehicle.
+
+        Segway's own service is a giveaway when the vehicle exposes it, but Gen2
+        vehicles speak the newer protocol over plain Nordic UART and expose
+        nothing else - so its absence proves nothing. What does distinguish the
+        two is where the failure happened: if service discovery completed and the
+        handshake still failed, the vehicle is there and talking, just not in the
+        classic dialect. A scooter that has ever answered the classic protocol is
+        never second-guessed.
+        """
+        if self._legacy_worked:
+            return False
+        if any(uuid.lower() == V2_SERVICE_UUID for uuid in self.gatt_services):
+            return True
+        return bool(self.gatt_services)
 
     @property
     def in_range(self) -> bool:

@@ -194,7 +194,11 @@ class NinebotClient:
                 _LOGGER.info("Please press power button on scooter!")
             if not paired:
                 raise TimeoutError(
-                    "Pairing not confirmed - press the scooter's power button during setup"
+                    "Pairing not confirmed. On models that pair this way, press "
+                    "the scooter's power button once while setup is waiting. If a "
+                    "short press only toggles the headlight, this model probably "
+                    "does not use button pairing at all and speaks the newer "
+                    "protocol instead"
                 )
 
         # Final PAIR handshake. Best-effort: some firmwares don't acknowledge a

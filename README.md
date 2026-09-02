@@ -81,7 +81,7 @@ is read back and an error is raised if the scooter did not accept it.
 | **Ninebot F40** | legacy | ✅ Confirmed working — sensors, paired first try |
 | E / ES / other F series | legacy | Likely to work — untested |
 | **Max G3 / G3 Plus** | Encryption2 | ✅ Confirmed working — battery, odometer, remaining range, temperature; needs the app's pairing password if already paired ([see below](#newer-models-and-the-account-lock)) |
-| G2, F2, E-series | Encryption2 | Untested — reports welcome |
+| G2, F2, F65, E-series | Encryption2 | Untested — reports welcome |
 
 **Works on every model, whatever the protocol:** presence (**In range**),
 **Signal strength** and **Last seen**. These come from the Bluetooth
@@ -99,12 +99,15 @@ useful on their own for knowing when the scooter arrives, leaves, or is moved.
 > got a chance to connect. Do not count on watching the charge from Home
 > Assistant on that model.
 
-Newer vehicles speak a different, AES-encrypted protocol. Confusingly they expose
-Segway's own GATT service `6e400001-0000-0000-006e-696e65626f74` ("ninebot" in
-ASCII) *and* the classic Nordic UART service — and which one they actually answer
-on varies by model (a Max G3 answers on the classic one). The integration works
-this out on the first connection, remembers it, and builds the matching entities.
-Writes (controls) are implemented for the legacy protocol only.
+Newer vehicles speak a different, AES-encrypted protocol. Which GATT service they
+use varies: some expose Segway's own `6e400001-0000-0000-006e-696e65626f74`
+("ninebot" in ASCII) *and* the classic Nordic UART service, answering on the
+classic one (a Max G3 does this); others expose only Nordic UART and are
+indistinguishable from a classic scooter until the handshake is tried. So the
+service list alone does not identify the protocol — the integration tries the
+classic handshake first and falls back to the newer one if the vehicle answers
+GATT but not the handshake, then remembers the result. Writes (controls) are
+implemented for the legacy protocol only.
 
 ### What some sensors really mean
 

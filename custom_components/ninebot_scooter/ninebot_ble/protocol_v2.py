@@ -155,10 +155,18 @@ class NinebotV2Client:
             str(service.uuid): [str(char.uuid) for char in service.characteristics]
             for service in self.client.services
         }
-        if SERVICE_UUID not in {uuid.lower() for uuid in self.gatt_services}:
+        # Gen2 talks over the classic Nordic UART service and need not expose
+        # Segway's own service at all - only Gen3 uses that one. Requiring it
+        # here rejected Nordic-UART-only vehicles before the handshake could even
+        # start; the generation sweep below already skips any generation whose
+        # write characteristic is missing, so accept either service and let it
+        # decide.
+        seen = {uuid.lower() for uuid in self.gatt_services}
+        if SERVICE_UUID not in seen and NORDIC_SERVICE_UUID not in seen:
             raise TimeoutError(
-                "Vehicle does not expose the Ninebot service - it does not speak "
-                f"this protocol. Services seen: {sorted(self.gatt_services)}"
+                "Vehicle exposes neither the Ninebot nor the Nordic UART service "
+                f"- it does not speak this protocol. Services seen: "
+                f"{sorted(self.gatt_services)}"
             )
 
         # Subscribe to every characteristic that can notify, not just the one the
