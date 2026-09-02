@@ -11,7 +11,7 @@ import asyncio
 import enum
 import logging
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Awaitable, Callable, TypeVar
 
 from homeassistant.components import bluetooth, persistent_notification
@@ -60,6 +60,14 @@ _ARRIVAL_RSSI_GAIN = 12
 # signal is allowed to cancel it. Short enough to catch the scooter before it
 # is switched off, long enough that a healthy poll finishes undisturbed.
 _STALLED_POLL_SECONDS = 8.0
+
+# How long after the last advertisement the scooter still counts as in range.
+# Home Assistant's own unavailable callback is driven by the learned advertising
+# interval, and a scooter that beacons only when it is handled teaches it a very
+# long one - "In range" was observed staying on 9.5 hours after the last packet.
+# Anything asking "is it here right now" needs a bound that does not depend on
+# how chatty the device happens to be.
+_PRESENCE_TIMEOUT = timedelta(minutes=5)
 
 # The scooter is often only awake for a minute or two, and reading every register
 # takes ~45 round trips - if the session ends early, whatever is read last is
@@ -133,7 +141,7 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         # Presence, straight from the advertisement. This works on every model,
         # including ones whose protocol we cannot speak yet.
-        self.in_range = False
+        self._in_range = False
         self.rssi: int | None = None
         self.last_seen: datetime | None = None
 
@@ -155,7 +163,7 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Start listening for the scooter's advertisement. Returns an unsub."""
         # Seed presence from what Home Assistant has already heard, so the state
         # is right immediately instead of after the next advertisement.
-        self.in_range = bluetooth.async_address_present(
+        self._in_range = bluetooth.async_address_present(
             self.hass, self.address, connectable=False
         )
         if service_info := bluetooth.async_last_service_info(
@@ -187,7 +195,7 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self, service_info: BluetoothServiceInfoBleak, change: BluetoothChange
     ) -> None:
         """Scooter is advertising: poll it, unless one is running or too recent."""
-        self.in_range = True
+        self._in_range = True
         self.rssi = service_info.rssi
         self.last_seen = dt_util.utcnow()
         self.async_update_listeners()
@@ -262,7 +270,7 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def _async_on_unavailable(self, service_info: BluetoothServiceInfoBleak) -> None:
         """Scooter is no longer heard; keep last values, just note it."""
         _LOGGER.debug("Scooter %s no longer seen over Bluetooth", self.address)
-        self.in_range = False
+        self._in_range = False
         self.rssi = None
         # Failures while it was riding out of range say nothing about the next
         # time it turns up. Clear the backoff so arriving home polls at once.
@@ -416,6 +424,20 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._persist({CONF_PROTOCOL: PROTOCOL_V2})
                 return await self._with_v2_client(self._read_all_v2)
             raise
+
+    @property
+    def in_range(self) -> bool:
+        """Whether the scooter is being heard right now.
+
+        Expires on its own: the unavailable callback can lag by hours on a device
+        that advertises rarely, and a presence flag nobody can trust is worse
+        than one that errs towards "gone".
+        """
+        if not self._in_range:
+            return False
+        if self.last_seen is None:
+            return False
+        return dt_util.utcnow() - self.last_seen <= _PRESENCE_TIMEOUT
 
     @property
     def v2_board(self) -> int | None:

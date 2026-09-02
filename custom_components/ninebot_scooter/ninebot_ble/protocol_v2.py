@@ -563,10 +563,13 @@ class V2Register:
     primary: bool = False
 
 
-# Kick scooters (Max G3 and relatives). Confirmed against a G3's own display:
-# battery read 89 % while the dashboard showed 89 %, and both voltage registers
-# read 5132 -> 51.32 V, consistent with 89 % on a 13S pack. Everything else in
-# the VCU sweep is still unidentified and deliberately not guessed at here.
+# Kick scooters (Max G3 and relatives). Every entry here was confirmed by
+# predicting the value from the app's own display and then reading it back, so a
+# wrong guess would have shown up as a mismatch rather than being talked into
+# fitting. 0x45/0x47 used to sit here as "pack voltage" on the strength of one
+# reading that happened to look plausible; a discharge from 89 % to 46 % moved
+# the pack 52.9 V -> 47.6 V and left both registers at 5132, so they are static
+# and were removed. Registers 0x43-0x48 appear to be a constant block.
 V2_VCU_REGISTERS: tuple[V2Register, ...] = (
     V2Register(
         key="Battery",
@@ -577,15 +580,36 @@ V2_VCU_REGISTERS: tuple[V2Register, ...] = (
         device_class="battery",
         primary=True,
     ),
+    # Read as u32: a u16 wraps at 6553.5 km, and 0x63 reads zero, which is what
+    # the high word of a u32 looks like at 1189 km.
     V2Register(
-        key="Battery voltage",
-        index=0x45,
+        key="Total mileage",
+        index=0x62,
+        length=4,
+        unpack=_u32,
+        scale=0.1,
+        unit="km",
+        device_class="distance",
+        primary=True,
+    ),
+    V2Register(
+        key="Remaining range",
+        index=0x5F,
         length=2,
         unpack=_u16,
         scale=0.01,
-        unit="V",
-        device_class="voltage",
+        unit="km",
+        device_class="distance",
         primary=True,
+    ),
+    V2Register(
+        key="Temperature",
+        index=0x6B,
+        length=2,
+        unpack=_u16,
+        scale=0.1,
+        unit="\u00b0C",
+        device_class="temperature",
     ),
 )
 

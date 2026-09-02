@@ -122,7 +122,11 @@ def _build_v2_descriptions(board: int) -> list[NinebotSensorEntityDescription]:
     for reg in registers_for_board(board):
         descriptions.append(
             NinebotSensorEntityDescription(
-                key=reg.key,
+                # Namespaced: several register names exist in both tables, and a
+                # vehicle that started on the legacy path before switching leaves
+                # a disabled registry entry behind under the bare name. The new
+                # entity then inherits "disabled" and silently never appears.
+                key=f"v2_{reg.key}",
                 reg_key=reg.key,
                 name=reg.key,
                 device_class=(

@@ -80,13 +80,24 @@ is read back and an error is raised if the scooter did not accept it.
 | MAX G30 / G30D | legacy | ✅ Confirmed working — sensors + controls |
 | **Ninebot F40** | legacy | ✅ Confirmed working — sensors, paired first try |
 | E / ES / other F series | legacy | Likely to work — untested |
-| **Max G3 / G3 Plus** | Encryption2 | ✅ Confirmed working — battery & pack voltage; needs the app's pairing password if already paired ([see below](#newer-models-and-the-account-lock)) |
+| **Max G3 / G3 Plus** | Encryption2 | ✅ Confirmed working — battery, odometer, remaining range, temperature; needs the app's pairing password if already paired ([see below](#newer-models-and-the-account-lock)) |
 | G2, F2, E-series | Encryption2 | Untested — reports welcome |
 
 **Works on every model, whatever the protocol:** presence (**In range**),
 **Signal strength** and **Last seen**. These come from the Bluetooth
 advertisement, so they need no connection, no pairing and no supported protocol —
 useful on their own for knowing when the scooter arrives, leaves, or is moved.
+
+> **Automate on Last seen, not on In range.** A scooter only advertises while it
+> is awake, and some models beacon just a couple of times a day, when physically
+> handled. `In range` is a presence flag and can lag the last real advertisement;
+> it is not a heartbeat. If you need "has this thing been heard recently", use
+> **Last seen** or **Last updated**, which carry an actual timestamp.
+
+> **Charging does not necessarily wake the Bluetooth stack.** On a Max G3, 92
+> minutes of charging produced no advertisement at all, so the integration never
+> got a chance to connect. Do not count on watching the charge from Home
+> Assistant on that model.
 
 Newer vehicles speak a different, AES-encrypted protocol. Confusingly they expose
 Segway's own GATT service `6e400001-0000-0000-006e-696e65626f74` ("ninebot" in
@@ -111,12 +122,16 @@ Not every register holds a live measurement, and this varies by model:
   voltage condition flags.
 - **Power** is computed from battery voltage × current rather than read from a
   register, so it goes negative while charging.
-- **On a Max G3 only battery and pack voltage are mapped so far.** Register
-  indexes are per board and differ by vehicle class: the E-series keeps its data
-  on the dashboard, kick scooters on the VCU. Until v0.11.0 the integration read
+- **On a Max G3, four registers are mapped so far**: battery, total mileage,
+  remaining range and temperature. Each was confirmed by predicting the value
+  from the scooter's own display *before* reading the register. Register indexes
+  are per board and differ by vehicle class: the E-series keeps its data on the
+  dashboard, kick scooters on the VCU. Until v0.11.0 the integration read
   dashboard indexes out of a G3's VCU, which is why it reported a range of
   1924.9 km and a speed of 1387.5 km/h — those were ASCII characters of the
-  vehicle identifier. The remaining G3 registers are not guessed at; see
+  vehicle identifier. **There is no pack voltage yet**: registers `0x43`–`0x48`
+  look like voltages but did not move at all across a 52.9 V → 47.6 V discharge,
+  so they are a static block. The remaining registers are not guessed at; see
   [issue #5](https://github.com/BobMcGlobus/ha-ninebot/issues/5) to help map them.
 - **Bluetooth pairing code** is not the pairing password. It is a six-byte field
   that reads as zeros on both a G30D and an F40, and is far too short to hold the
