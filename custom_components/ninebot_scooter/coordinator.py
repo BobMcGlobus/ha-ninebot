@@ -69,6 +69,10 @@ _STALLED_POLL_SECONDS = 8.0
 # how chatty the device happens to be.
 _PRESENCE_TIMEOUT = timedelta(minutes=5)
 
+# Budget held back from the poll timeout so that, when the classic handshake
+# fails, there is still time to try the newer protocol within the same poll.
+_V2_FALLBACK_RESERVE = 25.0
+
 # The scooter is often only awake for a minute or two, and reading every register
 # takes ~45 round trips - if the session ends early, whatever is read last is
 # lost. Read the registers people actually care about first; the battery lives at
@@ -287,7 +291,7 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             ble_device = self._ble_device()
             client = NinebotClient(app_key=self._app_key)
             try:
-                await client.connect(ble_device)
+                await client.connect(ble_device, pair_timeout=self._pair_timeout)
                 return await action(client)
             finally:
                 # Keep the GATT layout even when the connection failed - it is the
@@ -428,6 +432,18 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return result
         self._legacy_worked = True
         return data
+
+    @property
+    def _pair_timeout(self) -> float:
+        """How long the classic handshake may wait for a button press.
+
+        This has to fit inside the poll budget with room left over, or the poll
+        is cancelled before the attempt can fail - and an attempt that never
+        fails never reaches the fallback to the newer protocol. That is exactly
+        what happened on an F65I: the pairing wait outlived the poll by three
+        seconds, so the newer protocol was never tried at all.
+        """
+        return max(10.0, self._poll_timeout - _V2_FALLBACK_RESERVE)
 
     def _should_try_v2(self) -> bool:
         """Whether a failed legacy attempt is worth retrying as a newer vehicle.
