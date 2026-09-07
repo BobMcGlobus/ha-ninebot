@@ -193,13 +193,28 @@ class NinebotClient:
                 # If we get here, the button on the scooter need to be pressed.
                 _LOGGER.info("Please press power button on scooter!")
             if not paired:
-                raise TimeoutError(
-                    "Pairing not confirmed. On models that pair this way, press "
-                    "the scooter's power button once while setup is waiting. If a "
-                    "short press only toggles the headlight, this model probably "
-                    "does not use button pairing at all and speaks the newer "
-                    "protocol instead"
+                # Some models never acknowledge PAIR and have no way to confirm
+                # it either - on an F65I a short power press only toggles the
+                # headlight. But INIT already established an encrypted session
+                # and returned the vehicle's key and serial, so the session may
+                # be usable regardless. Find out by reading, rather than
+                # insisting on a confirmation the vehicle may not implement.
+                _LOGGER.debug(
+                    "PAIR never acknowledged; trying the session anyway"
                 )
+                if not await self._any_session_key_works(received_key):
+                    raise TimeoutError(
+                        "Pairing not confirmed, and the scooter did not answer an "
+                        "encrypted read either. On models that pair this way, press "
+                        "the power button once while setup is waiting; if a short "
+                        "press only toggles the headlight, this model does not use "
+                        "button pairing and is not supported over this protocol"
+                    )
+                _LOGGER.info(
+                    "Scooter never acknowledged pairing but answers encrypted "
+                    "reads; continuing without it"
+                )
+                return
 
         # Final PAIR handshake. Best-effort: some firmwares don't acknowledge a
         # redundant PAIR when the scooter is already registered from a previous
@@ -218,21 +233,32 @@ class NinebotClient:
         # simply cannot decrypt our requests and never answers, so every register
         # read times out. Probe with a cheap read and fall back to the other
         # derivation rather than guessing.
-        if not await self._session_works():
-            _LOGGER.debug("Session key rejected; retrying with the app-data key")
-            self.crypto.set_app_data(self.app_key)
-            if not await self._session_works():
-                _LOGGER.debug("App-data key rejected too; retrying with the BLE-data key")
-                self.crypto.set_ble_data(received_key)
-                if not await self._session_works():
-                    raise TimeoutError(
-                        "Scooter never answered an encrypted read. Either it needs "
-                        "re-pairing (remove and re-add the integration, then press "
-                        "the power button), or this model uses a newer protocol "
-                        "that is not supported yet"
-                    )
+        if not await self._any_session_key_works(received_key):
+            raise TimeoutError(
+                "Scooter never answered an encrypted read. Either it needs "
+                "re-pairing (remove and re-add the integration, then press "
+                "the power button), or this model uses a newer protocol "
+                "that is not supported yet"
+            )
 
         _LOGGER.debug("Connected and authenticated successfully!")
+
+    async def _any_session_key_works(self, received_key: bytes) -> bool:
+        """Try each key derivation in turn, returning True on the first that reads.
+
+        Which derivation the scooter expects depends on its pairing state, and
+        picking wrong fails *silently*: it simply cannot decrypt our requests and
+        never answers, so every register read times out. Probe rather than guess.
+        """
+        if await self._session_works():
+            return True
+        _LOGGER.debug("Session key rejected; retrying with the app-data key")
+        self.crypto.set_app_data(self.app_key)
+        if await self._session_works():
+            return True
+        _LOGGER.debug("App-data key rejected too; retrying with the BLE-data key")
+        self.crypto.set_ble_data(received_key)
+        return await self._session_works()
 
     async def _session_works(self) -> bool:
         """Cheap probe read to verify the encrypted session is understood."""

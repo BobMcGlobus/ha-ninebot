@@ -80,6 +80,8 @@ is read back and an error is raised if the scooter did not accept it.
 | MAX G30 / G30D | legacy | ✅ Confirmed working — sensors + controls |
 | **Ninebot F40** | legacy | ✅ Confirmed working — sensors, paired first try |
 | E / ES / other F series | legacy | Likely to work — untested |
+| **F65I** | legacy (partial) | ⚠️ Answers INIT and PING but never acknowledges pairing, and a short power press only toggles the headlight — [#6](https://github.com/BobMcGlobus/ha-ninebot/issues/6) |
+| **E110SE** | under investigation | ⚠️ [#7](https://github.com/BobMcGlobus/ha-ninebot/issues/7) |
 | **Max G3 / G3 Plus** | Encryption2 | ✅ Confirmed working — battery, odometer, remaining range, temperature, awake & riding time; needs the app's pairing password if already paired ([see below](#newer-models-and-the-account-lock)) |
 | G2, F2, F65, E-series | Encryption2 | Untested — reports welcome |
 

@@ -136,6 +136,7 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._failures = 0  # consecutive failures, used to back off
         self._last_attempt = 0.0  # monotonic time of the last poll ATTEMPT
         self._legacy_worked = False  # the classic protocol has answered here
+        self._preempted = False  # a poll was already cut short for a closer one
         self._last_attempt_rssi: int | None = None  # signal at the last poll
         self._v2_board: int | None = entry.data.get(CONF_V2_BOARD)
         self._button_notification_id = f"ninebot_pair_{entry.entry_id}"
@@ -217,7 +218,12 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         running = self._poll_task is not None and not self._poll_task.done()
         if running:
             stalled = time.monotonic() - self._last_attempt >= _STALLED_POLL_SECONDS
-            if not (arrived and stalled):
+            # Only ever preempt once before a poll is allowed to finish. On a
+            # link whose signal swings around - a proxy at the edge of range -
+            # every reading looks like an arrival, and preempting each time
+            # starves the poll: it is restarted forever and never completes, so
+            # the coordinator reports neither data nor an error.
+            if not (arrived and stalled) or self._preempted:
                 return
             # Started while the scooter was out of reach and still has not
             # finished; the signal we have now is far better than the one it is
@@ -228,6 +234,7 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._last_attempt_rssi,
                 service_info.rssi,
             )
+            self._preempted = True
             self._poll_task.cancel()
 
         # Throttle by time since the last SUCCESS, so a good poll is not repeated
@@ -264,6 +271,12 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "scooter went out of range, or it needs longer than this to "
                 "answer and the timeout should be raised under Configure"
             )
+            # Mark the coordinator failed explicitly. A refresh cancelled from
+            # outside never runs the coordinator's own error handling, so
+            # last_update_success would stay at its initial True: the diagnostics
+            # then report a clean success with no data and no error, which is
+            # exactly what an E110SE reported.
+            self.async_set_update_error(UpdateFailed(self.last_error))
             _LOGGER.warning(
                 "Poll of %s timed out after %.0fs. If this repeats while the "
                 "scooter is parked and in range, raise the poll timeout.",
@@ -281,6 +294,7 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # time it turns up. Clear the backoff so arriving home polls at once.
         self._failures = 0
         self._last_attempt_rssi = None
+        self._preempted = False
         self.async_update_listeners()
 
     # -- BLE session --------------------------------------------------------------
@@ -406,6 +420,7 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             raise UpdateFailed(f"Error communicating with scooter: {err}") from err
 
         self._failures = 0
+        self._preempted = False
         self.last_error = None
         self.last_update_time = dt_util.utcnow()
         self._last_success = time.monotonic()
