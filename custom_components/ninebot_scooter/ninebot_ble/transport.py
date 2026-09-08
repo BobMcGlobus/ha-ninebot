@@ -114,12 +114,22 @@ class NinebotClient:
         # Populated on connect: {service_uuid: [characteristic_uuid, ...]}. Useful
         # for diagnosing models we don't support yet, which use different UUIDs.
         self.gatt_services: dict[str, list[str]] = {}
+        # True when the vehicle never acknowledged PAIR yet read fine anyway.
+        self.paired_without_confirmation = False
 
-    async def connect(self, device: BLEDevice, pair_timeout: float = 45.0) -> None:
+    async def connect(
+        self,
+        device: BLEDevice,
+        pair_timeout: float = 45.0,
+        skip_pairing: bool = False,
+    ) -> None:
         """Connect and handshake the scooter.
 
         This function must be called before any other. ``pair_timeout`` bounds how
         long the initial pairing waits for the user to press the power button.
+        ``skip_pairing`` goes straight to the encrypted session, for vehicles
+        already known never to acknowledge PAIR - waiting for them costs twenty
+        seconds of every poll and can only ever time out.
         """
         self.crypto.set_name(device.name.encode() if device.name else b"Unnamed")
 
@@ -174,7 +184,7 @@ class NinebotClient:
             # Zero (0) indicates we are not paired yet. Loop for a bounded time
             # waiting for the user to confirm pairing with the power button.
             paired = False
-            deadline = time.time() + pair_timeout
+            deadline = time.time() + (0.0 if skip_pairing else pair_timeout)
             while time.time() < deadline:
                 await asyncio.sleep(1.0)
                 # Sending pair request here seem to pair the device. Unclear why.
@@ -199,9 +209,8 @@ class NinebotClient:
                 # and returned the vehicle's key and serial, so the session may
                 # be usable regardless. Find out by reading, rather than
                 # insisting on a confirmation the vehicle may not implement.
-                _LOGGER.debug(
-                    "PAIR never acknowledged; trying the session anyway"
-                )
+                if not skip_pairing:
+                    _LOGGER.debug("PAIR never acknowledged; trying the session anyway")
                 if not await self._any_session_key_works(received_key):
                     raise TimeoutError(
                         "Pairing not confirmed, and the scooter did not answer an "
@@ -210,9 +219,11 @@ class NinebotClient:
                         "press only toggles the headlight, this model does not use "
                         "button pairing and is not supported over this protocol"
                     )
-                _LOGGER.info(
+                self.paired_without_confirmation = True
+                _LOGGER.log(
+                    logging.DEBUG if skip_pairing else logging.INFO,
                     "Scooter never acknowledged pairing but answers encrypted "
-                    "reads; continuing without it"
+                    "reads; continuing without it",
                 )
                 return
 

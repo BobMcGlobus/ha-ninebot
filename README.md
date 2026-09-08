@@ -10,8 +10,8 @@ See [Model support](#model-support) for what is confirmed on real hardware, and
 [the account lock](#newer-models-and-the-account-lock) if a newer scooter refuses
 to pair.
 
-> **Status: beta.** Sensors and controls are confirmed working on a **MAX G30D**;
-> sensors on an **F40** and a **Max G3**.
+> **Status: beta.** Sensors and controls are confirmed working on a **MAX G30D**
+> and an **F65I**; sensors on an **F40** and a **Max G3**.
 > Started as a packaged, HACS-installable fork of
 > [ownbee/ninebot-integration](https://github.com/ownbee/ninebot-integration) +
 > [ownbee/ninebot-ble](https://github.com/ownbee/ninebot-ble), with the protocol
@@ -43,6 +43,14 @@ and raises an error if the scooter did not accept the change.
 - **Recuperation / KERS** (select): Off / Medium / Strong
 - **Cruise control** (switch)
 - **Tail light** (switch)
+
+Not every model pairs the same way. A G30D registers Home Assistant when you
+press its power button; an **F65I never acknowledges pairing at all**, and a short
+press on it just toggles the headlight. That turns out not to matter: the
+encrypted session is established by the first exchange, so where the confirmation
+never arrives the integration checks whether the scooter answers an encrypted
+read and carries on if it does. It remembers that per scooter, so later polls skip
+the wait.
 
 Locking flips a single bit of a packed status word, leaving the other flags in it
 untouched. Some firmwares may only permit this from the official app — you'll get
@@ -80,7 +88,7 @@ is read back and an error is raised if the scooter did not accept it.
 | MAX G30 / G30D | legacy | ✅ Confirmed working — sensors + controls |
 | **Ninebot F40** | legacy | ✅ Confirmed working — sensors, paired first try |
 | E / ES / other F series | legacy | Likely to work — untested |
-| **F65I** | legacy (partial) | ⚠️ Answers INIT and PING but never acknowledges pairing, and a short power press only toggles the headlight — [#6](https://github.com/BobMcGlobus/ha-ninebot/issues/6) |
+| **Ninebot F65I** | legacy | ✅ Confirmed working — sensors + controls. Never acknowledges pairing and has no button confirmation; the integration reads it without one |
 | **E110SE** | under investigation | ⚠️ [#7](https://github.com/BobMcGlobus/ha-ninebot/issues/7) |
 | **Max G3 / G3 Plus** | Encryption2 | ✅ Confirmed working — battery, odometer, remaining range, temperature, awake & riding time; needs the app's pairing password if already paired ([see below](#newer-models-and-the-account-lock)) |
 | G2, F2, F65, E-series | Encryption2 | Untested — reports welcome |

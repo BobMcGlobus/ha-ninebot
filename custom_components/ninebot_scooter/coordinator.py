@@ -30,6 +30,7 @@ from .const import (
     CONF_POLL_INTERVAL,
     CONF_POLL_TIMEOUT,
     CONF_PROTOCOL,
+    CONF_NO_BUTTON_PAIRING,
     CONF_V2_BOARD,
     CONF_V2_GENERATION,
     CONF_V2_PASSWORD,
@@ -139,6 +140,9 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._preempted = False  # a poll was already cut short for a closer one
         self._last_attempt_rssi: int | None = None  # signal at the last poll
         self._v2_board: int | None = entry.data.get(CONF_V2_BOARD)
+        self._no_button_pairing: bool = bool(
+            entry.data.get(CONF_NO_BUTTON_PAIRING, False)
+        )
         self._button_notification_id = f"ninebot_pair_{entry.entry_id}"
         self._poll_task: asyncio.Task | None = None
 
@@ -305,8 +309,23 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             ble_device = self._ble_device()
             client = NinebotClient(app_key=self._app_key)
             try:
-                await client.connect(ble_device, pair_timeout=self._pair_timeout)
-                return await action(client)
+                await client.connect(
+                    ble_device,
+                    pair_timeout=self._pair_timeout,
+                    skip_pairing=self._no_button_pairing,
+                )
+                result = await action(client)
+                # Waiting for a confirmation this vehicle never sends costs
+                # twenty seconds of every poll, which on a slow link is the
+                # difference between finishing and hitting the poll timeout.
+                if client.paired_without_confirmation and not self._no_button_pairing:
+                    _LOGGER.info(
+                        "%s reads without acknowledging pairing; skipping the "
+                        "pairing wait from now on", self.address
+                    )
+                    self._no_button_pairing = True
+                    self._persist({CONF_NO_BUTTON_PAIRING: True})
+                return result
             finally:
                 # Keep the GATT layout even when the connection failed - it is the
                 # most useful clue when someone reports an unsupported model.
