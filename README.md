@@ -89,7 +89,7 @@ is read back and an error is raised if the scooter did not accept it.
 | **Ninebot F40** | legacy | ✅ Confirmed working — sensors, paired first try |
 | E / ES / other F series | legacy | Likely to work — untested |
 | **Ninebot F65I** | legacy | ✅ Confirmed working — sensors + controls. Never acknowledges pairing and has no button confirmation; the integration reads it without one |
-| **E110SE** | under investigation | ⚠️ [#7](https://github.com/BobMcGlobus/ha-ninebot/issues/7) |
+| **Segway E110SE** | Encryption2 | ⚠️ Handshake completes with a recovered pairing password, then authentication goes unanswered — [#7](https://github.com/BobMcGlobus/ha-ninebot/issues/7) |
 | **Max G3 / G3 Plus** | Encryption2 | ✅ Confirmed working — battery, odometer, remaining range, temperature, awake & riding time; needs the app's pairing password if already paired ([see below](#newer-models-and-the-account-lock)) |
 | G2, F2, F65, E-series | Encryption2 | Untested — reports welcome |
 
@@ -200,6 +200,12 @@ directly. Two ways to obtain it, both requiring access to your own devices:
 ```bash
 python3 tools/recover_password_from_app.py APPDATA --capture btsnoop_hci.log --name <SERIAL>
 ```
+
+> A password that is wrong in any byte fails **silently**: the vehicle cannot
+> authenticate the frame, so it drops it without answering, and the symptom is a
+> timeout at authentication rather than a refusal. If setup gets as far as
+> `PRE_COMM ok` and then times out on command `0x5D`, suspect the password before
+> anything else.
 
 `APPDATA` can be an iOS `com.ninebot.segway.plist` (key `<SERIAL>_decrypt`), an
 Android shared-prefs XML or database, or an `adb backup` file. Every 16-byte value

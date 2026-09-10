@@ -325,15 +325,38 @@ class NinebotV2Client:
 
         # Phase 3 - AUTH, keyed on the session password.
         assert self.password is not None
+        payload = (self.serial or "").encode().ljust(14, b"\x00")[:14]
         self.crypto.set_key(self.password, self._auth_param)
-        auth = await self._request(
-            BOARD_BLE,
-            CMD_AUTH,
-            0,
-            (self.serial or "").encode().ljust(14, b"\x00")[:14],
-            expect=CMD_AUTH,
-            timeout=4,
-        )
+        try:
+            auth = await self._request(
+                BOARD_BLE, CMD_AUTH, 0, payload, expect=CMD_AUTH, timeout=4
+            )
+        except TimeoutError:
+            # Silence here means the vehicle could not authenticate the frame, so
+            # it dropped it without answering - a wrong password looks exactly
+            # like this. Before reporting that, try the name-derived key once:
+            # it costs one frame on a path that has already failed, and it tells
+            # us whether this model keys AUTH differently. Speculative, and the
+            # log says which one answered.
+            _LOGGER.debug("AUTH unanswered under the password key; trying the name key")
+            self.crypto.set_key(name.encode(), self._auth_param)
+            try:
+                auth = await self._request(
+                    BOARD_BLE, CMD_AUTH, 0, payload, expect=CMD_AUTH, timeout=4
+                )
+            except TimeoutError:
+                raise TimeoutError(
+                    "Vehicle did not answer authentication under either key. The "
+                    "usual cause is a wrong pairing password: an AUTH frame the "
+                    "vehicle cannot authenticate is dropped silently rather than "
+                    "refused. Check the password under Configure, and that it was "
+                    "verified against a capture from this vehicle"
+                ) from None
+            _LOGGER.warning(
+                "%s authenticated with the name-derived key, not the configured "
+                "password - please report this, it means the model keys AUTH "
+                "differently", self.serial,
+            )
         if auth.index != 1:
             self.password = None  # force a fresh pairing next time
             raise TimeoutError(
