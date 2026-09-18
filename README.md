@@ -44,6 +44,13 @@ and raises an error if the scooter did not accept the change.
 - **Cruise control** (switch)
 - **Tail light** (switch)
 
+> **Controls exist for the classic protocol only.** Models on the newer encrypted
+> protocol — Max G3 and relatives — are read-only for now: the integration can
+> poll every sensor it knows, but sends nothing back. Writing needs a capture of
+> the official app changing a setting, so the command is known rather than
+> guessed. See [#8](https://github.com/BobMcGlobus/ha-ninebot/issues/8) if you can
+> help with that.
+
 Not every model pairs the same way. A G30D registers Home Assistant when you
 press its power button; an **F65I never acknowledges pairing at all**, and a short
 press on it just toggles the headlight. That turns out not to matter: the
@@ -90,7 +97,7 @@ is read back and an error is raised if the scooter did not accept it.
 | E / ES / other F series | legacy | Likely to work — untested |
 | **Ninebot F65I** | legacy | ✅ Confirmed working — sensors + controls. Never acknowledges pairing and has no button confirmation; the integration reads it without one |
 | **Segway E110SE** | Encryption2 | ⚠️ Handshake completes with a recovered pairing password, then authentication goes unanswered — [#7](https://github.com/BobMcGlobus/ha-ninebot/issues/7) |
-| **Max G3 / G3 Plus** | Encryption2 | ✅ Confirmed working — battery, odometer, remaining range, temperature, awake & riding time; needs the app's pairing password if already paired ([see below](#newer-models-and-the-account-lock)) |
+| **Max G3 / G3 Plus** | Encryption2 | ✅ Confirmed working on **two** scooters — battery, odometer, remaining range, temperature, awake & riding time, each checked against the app's own display. Sensors only, no controls. Needs the app's pairing password if already paired ([see below](#newer-models-and-the-account-lock)) |
 | G2, F2, F65, E-series | Encryption2 | Untested — reports welcome |
 
 **Works on every model, whatever the protocol:** presence (**In range**),
