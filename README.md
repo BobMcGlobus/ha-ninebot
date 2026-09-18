@@ -214,7 +214,21 @@ scooter, so the password it prints is proven correct before you use it. Paste th
 result into the **Pairing password** option.
 
 - **iOS is the easy route:** a normal *unencrypted* Finder/iTunes backup contains
-  the plist. No jailbreak needed.
+  the plist. No jailbreak needed. If you would rather not touch the command line at
+  all, you can read the value straight out of the backup with a plist viewer
+  ([iBackup Viewer](https://www.imactools.com/iphonebackupviewer/) is one, thanks
+  to @bassemolufda for the walkthrough):
+
+  1. Make an **unencrypted** backup of the iPhone with Finder/iTunes.
+  2. Open it in iBackup Viewer and pick **AppDomain → com.ninebot.segway**.
+  3. Open **Library/Preferences/com.ninebot.segway.plist** (Preview → Automatic).
+  4. Under **Root** find the key **`<SERIAL>_decrypt`**; its value is the password.
+  5. Paste that into the **Pairing password** option.
+
+  Read this way the value is not verified against a capture first, so if
+  authentication then times out, double-check you copied the right key (it is the
+  one named for *your* serial) and see the note above about wrong passwords failing
+  silently.
 - **On Android, `adb backup` does not work** — Segway ships the app with
   `allowBackup=false`, so the backup comes out empty (a 1 KB file of zeros). Root
   access is needed to read `/data/data/com.ninebot.segway/shared_prefs/`.
