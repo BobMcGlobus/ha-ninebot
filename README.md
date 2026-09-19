@@ -162,6 +162,29 @@ Not every register holds a live measurement, and this varies by model:
   that reads as zeros on both a G30D and an F40, and is far too short to hold the
   16-byte key — so it cannot be used to back up your pairing.
 
+### Finding registers on an unmapped model
+
+Two services let you probe a scooter directly from **Developer tools → Actions**,
+without writing code or capturing Bluetooth:
+
+- **Ninebot Scooter: Read register** — read one address and see it interpreted
+  every plausible way at once (hex, 16-bit both byte orders, 32-bit, and as text
+  when every byte is printable).
+- **Ninebot Scooter: Scan registers** — read a run of addresses in one
+  connection, skipping the ones that answer with zeros.
+
+The method that actually works: **scan, change something physical, scan again,
+and compare.** A register that moves when the battery drains is a charge level; a
+register that moves only while the wheels turn is a riding counter; one that
+never moves through a full charge is not a measurement at all. Every value
+currently mapped for the Max G3 was found this way, and one that *looked* right
+on a single reading turned out to be a constant.
+
+Which board to ask depends on the protocol. The classic one addresses `0x20`
+control, `0x21` Bluetooth and `0x22` battery; the newer one uses `0x01` for the
+E-series dashboard and `0x16` for a kick scooter's vehicle controller. If a board
+answers nothing at all, that is itself worth reporting.
+
 **If your model doesn't work, the most useful thing you can send** is the
 integration's **Download diagnostics** file, attached to an issue. It records what
 the scooter advertises, which GATT services it exposes, and why the last attempt

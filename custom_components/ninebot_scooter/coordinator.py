@@ -467,6 +467,52 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._legacy_worked = True
         return data
 
+    # -- register probing ---------------------------------------------------
+    # Exposed as services so that someone with an unmapped model can find where
+    # their scooter keeps a value, without writing code or capturing Bluetooth.
+
+    async def async_read_raw(self, board: int, index: int, length: int) -> bytes:
+        """Read one register by raw address, whichever protocol this vehicle speaks."""
+        if self.protocol == PROTOCOL_V2:
+            return await self._with_v2_client(
+                lambda client: client.read_register(board, index, length)
+            )
+        return bytes(
+            await self._with_client(
+                lambda client: client.read_raw(board, index, length)
+            )
+        )
+
+    async def async_scan(
+        self, board: int, start: int, count: int, length: int
+    ) -> dict[int, bytes]:
+        """Read a run of registers in one session.
+
+        One session for the whole sweep: reconnecting per register would take
+        far longer than the scooter stays awake, and a sweep is only useful if
+        every value in it was read at the same moment.
+        """
+
+        async def _sweep(client: Any) -> dict[int, bytes]:
+            found: dict[int, bytes] = {}
+            for offset in range(count):
+                index = start + offset
+                try:
+                    if self.protocol == PROTOCOL_V2:
+                        raw = await client.read_register(board, index, length)
+                    else:
+                        raw = bytes(await client.read_raw(board, index, length))
+                except Exception as err:  # noqa: BLE001 - a silent register is a result
+                    _LOGGER.debug("Scan: 0x%02X did not answer: %s", index, err)
+                    continue
+                if raw:
+                    found[index] = bytes(raw)
+            return found
+
+        if self.protocol == PROTOCOL_V2:
+            return await self._with_v2_client(_sweep)
+        return await self._with_client(_sweep)
+
     @property
     def _pair_timeout(self) -> float:
         """How long the classic handshake may wait for a button press.

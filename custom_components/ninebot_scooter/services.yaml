@@ -1,0 +1,73 @@
+read_register:
+  fields:
+    device_id:
+      required: true
+      selector:
+        device:
+          integration: ninebot_scooter
+    board:
+      required: true
+      example: 22
+      default: 22
+      selector:
+        number:
+          min: 0
+          max: 255
+          mode: box
+    index:
+      required: true
+      example: 64
+      selector:
+        number:
+          min: 0
+          max: 255
+          mode: box
+    length:
+      required: false
+      default: 2
+      selector:
+        number:
+          min: 1
+          max: 8
+          mode: slider
+
+scan_registers:
+  fields:
+    device_id:
+      required: true
+      selector:
+        device:
+          integration: ninebot_scooter
+    board:
+      required: true
+      example: 22
+      default: 22
+      selector:
+        number:
+          min: 0
+          max: 255
+          mode: box
+    start:
+      required: false
+      default: 32
+      selector:
+        number:
+          min: 0
+          max: 255
+          mode: box
+    count:
+      required: false
+      default: 64
+      selector:
+        number:
+          min: 1
+          max: 128
+          mode: slider
+    length:
+      required: false
+      default: 2
+      selector:
+        number:
+          min: 1
+          max: 8
+          mode: slider

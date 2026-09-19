@@ -362,6 +362,24 @@ class NinebotClient:
             data.extend(resp.data_segment)
         return data
 
+    async def read_raw(self, board: int, index: int, length: int) -> list[int]:
+        """Read one register by its raw address, with no table lookup.
+
+        The register tables only describe what is already known. Finding what a
+        model keeps where needs a way to ask for an address nobody has named yet.
+        """
+        try:
+            target = DeviceId(board)
+        except ValueError:
+            known = ", ".join(f"0x{d.value:02X} ({d.name})" for d in DeviceId)
+            raise ValueError(
+                f"0x{board:02X} is not a board this protocol addresses. Known: {known}"
+            ) from None
+        resp = await self.request(
+            Packet(DeviceId.PC, target, Command.READ, index, [length])
+        )
+        return list(resp.data_segment[:length])
+
     async def read_reg(self, index: CtrlIdx | BmsIdx) -> Any:
         """Read scooter memory register.
 

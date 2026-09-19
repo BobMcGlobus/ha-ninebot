@@ -38,5 +38,55 @@
     "error": {
       "invalid_password": "Muss aus 32 Hex-Zeichen (16 Byte) bestehen."
     }
+  },
+  "services": {
+    "read_register": {
+      "name": "Register lesen",
+      "description": "Ein Register direkt vom Roller lesen, über die Rohadresse. Um herauszufinden, wo ein noch nicht erfasstes Modell einen Wert ablegt.",
+      "fields": {
+        "device_id": {
+          "name": "Roller",
+          "description": "Von welchem Roller gelesen wird."
+        },
+        "board": {
+          "name": "Baustein",
+          "description": "Welcher Baustein gefragt wird. Altes Protokoll: 32 Steuerung, 33 Bluetooth, 34 Batterie. Neueres Protokoll: 1 Display, 22 Fahrzeugsteuerung."
+        },
+        "index": {
+          "name": "Register",
+          "description": "Zu lesende Registeradresse."
+        },
+        "length": {
+          "name": "Länge",
+          "description": "Zu lesende Bytes. Zwei reichen für die meisten Werte."
+        }
+      }
+    },
+    "scan_registers": {
+      "name": "Register durchsuchen",
+      "description": "Eine Reihe von Registern in einer Verbindung lesen. Einmal durchsuchen, am Roller etwas ändern, nochmal durchsuchen und vergleichen: Das Register, das sich bewegt hat, ist das gesuchte.",
+      "fields": {
+        "device_id": {
+          "name": "Roller",
+          "description": "Von welchem Roller gelesen wird."
+        },
+        "board": {
+          "name": "Baustein",
+          "description": "Welcher Baustein durchsucht wird."
+        },
+        "start": {
+          "name": "Erstes Register",
+          "description": "Adresse, bei der begonnen wird."
+        },
+        "count": {
+          "name": "Anzahl",
+          "description": "Zu lesende Register. Der Roller muss die ganze Zeit wach bleiben."
+        },
+        "length": {
+          "name": "Länge",
+          "description": "Bytes pro Register."
+        }
+      }
+    }
   }
 }

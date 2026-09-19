@@ -38,5 +38,55 @@
     "error": {
       "invalid_password": "Must be 32 hex characters (16 bytes)."
     }
+  },
+  "services": {
+    "read_register": {
+      "name": "Read register",
+      "description": "Read one register straight off the scooter, by raw address. For working out where an unmapped model keeps a value.",
+      "fields": {
+        "device_id": {
+          "name": "Scooter",
+          "description": "Which scooter to read from."
+        },
+        "board": {
+          "name": "Board",
+          "description": "Which board to ask. Classic protocol: 32 control, 33 Bluetooth, 34 battery. Newer protocol: 1 dashboard, 22 vehicle controller."
+        },
+        "index": {
+          "name": "Register",
+          "description": "Register address to read."
+        },
+        "length": {
+          "name": "Length",
+          "description": "Bytes to read. Two covers most values."
+        }
+      }
+    },
+    "scan_registers": {
+      "name": "Scan registers",
+      "description": "Read a run of registers in one connection. Sweep once, change something on the scooter, sweep again, and compare: the register that moved is the one you were looking for.",
+      "fields": {
+        "device_id": {
+          "name": "Scooter",
+          "description": "Which scooter to read from."
+        },
+        "board": {
+          "name": "Board",
+          "description": "Which board to sweep."
+        },
+        "start": {
+          "name": "First register",
+          "description": "Address to start at."
+        },
+        "count": {
+          "name": "How many",
+          "description": "Registers to read. The scooter must stay awake for the whole sweep."
+        },
+        "length": {
+          "name": "Length",
+          "description": "Bytes per register."
+        }
+      }
+    }
   }
 }

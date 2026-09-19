@@ -9,6 +9,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
 from .const import CONF_APP_KEY, DOMAIN, PLATFORMS
+from .services import async_setup_services
 from .coordinator import NinebotCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -39,6 +40,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             hass, coordinator.async_refresh(), "ninebot_scooter initial poll"
         )
 
+    async_setup_services(hass)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     return True
