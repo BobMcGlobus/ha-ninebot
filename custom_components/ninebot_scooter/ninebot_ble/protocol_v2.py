@@ -580,6 +580,19 @@ def _u32(data: bytes) -> int:
     return struct.unpack("<I", data[:4])[0]
 
 
+def _bit(bit: int) -> Callable[[bytes], int]:
+    """Read one flag out of the low byte of a status word."""
+    return lambda data: (data[0] >> bit) & 1
+
+
+_RIDE_MODES: dict[int, str] = {0: "Eco", 1: "Drive", 2: "Sport"}
+
+
+def _ride_mode(data: bytes) -> str | int:
+    """Name the ride mode, passing an unknown value through as the raw number."""
+    return _RIDE_MODES.get(data[0], data[0])
+
+
 @dataclass(frozen=True, kw_only=True)
 class V2Register:
     """One readable value on a newer vehicle, on a specific board."""
@@ -668,7 +681,62 @@ V2_VCU_REGISTERS: tuple[V2Register, ...] = (
         unit="\u00b0C",
         device_class="temperature",
     ),
+    # Two charger bits that are easy to mistake for each other, separated on an
+    # F3 by sweeping the board with the charger in and out and then re-reading
+    # at 100 %: 0x1F bit 6 follows the cable and stays set once the pack is
+    # full, 0x1C bit 2 follows the charge itself and clears at 100 %.
+    V2Register(
+        key="Charger connected",
+        index=0x1F,
+        length=2,
+        unpack=_bit(6),
+        primary=True,
+    ),
+    V2Register(
+        key="Charging",
+        index=0x1C,
+        length=2,
+        unpack=_bit(2),
+        primary=True,
+    ),
+    # Not a current, though a 2276 looks like one: it climbed while the pack sat
+    # at 100 %, and its steps follow the wall clock rather than the charge
+    # (213 -> 257 over 44 s, 304 at +96 s). Plugging in and unplugging both
+    # reset it, so it counts from the last change of charger state either way.
+    V2Register(
+        key="Time since charger change",
+        index=0x69,
+        length=2,
+        unpack=_u16,
+        unit="s",
+        device_class="duration",
+    ),
+    # The E / D / S indicator on the dashboard. The app writes this register to
+    # change mode and the vehicle reads the new value straight back.
+    V2Register(
+        key="Ride mode",
+        index=0x70,
+        length=2,
+        unpack=_ride_mode,
+        primary=True,
+    ),
 )
+
+# Read on an F3 and deliberately left out of the table above.
+#
+# 0x47 = 5388, 0xC3 = 9624 and 0x1D = 6300 did not move across a full charge or
+# a ride. A constant with a plausible scale is how 0x45 went in as pack voltage,
+# so none of them earns a sensor on one reading.
+#
+# 0x43-0x48 read constant because they are settings rather than measurements:
+# two per-mode speed limits in km/h packed into each register, which is why 0x47
+# reads 5388 here and 5132 on a Max G3. 0x6E (1..3, likely regen level) and 0x42
+# (0..5, meaning unknown) are the same kind of thing. All are app-writable and
+# belong in a control, not a sensor.
+#
+# 0x6A is 1 only while the pack is taking charge and 0 at 100 % or just after
+# re-plugging - close enough to 0x1C bit 2 that one of the two must be misread,
+# and a single vehicle cannot say which. It stays out until a second one agrees.
 
 # E-series mopeds, which proxy values through the dashboard. These indexes come
 # from the protocol documentation and are NOT confirmed on hardware.
