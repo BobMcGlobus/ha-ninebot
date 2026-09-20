@@ -26,6 +26,7 @@ CONF_PROTOCOL = "protocol"
 CONF_V2_PASSWORD = "v2_password"  # hex-encoded session password for newer models
 CONF_V2_GENERATION = "v2_generation"  # which protocol generation the vehicle uses
 CONF_V2_BOARD = "v2_board"  # which board answers register reads on this vehicle
+CONF_V2_BMS_BOARD = "v2_bms_board"  # which board the battery pack answers on
 # Set once a vehicle has proved it never acknowledges PAIR but reads fine anyway,
 # so later polls skip a pairing wait that can only ever time out.
 CONF_NO_BUTTON_PAIRING = "no_button_pairing"

@@ -31,6 +31,7 @@ from .const import (
     CONF_POLL_TIMEOUT,
     CONF_PROTOCOL,
     CONF_NO_BUTTON_PAIRING,
+    CONF_V2_BMS_BOARD,
     CONF_V2_BOARD,
     CONF_V2_GENERATION,
     CONF_V2_PASSWORD,
@@ -44,7 +45,10 @@ from .ninebot_ble.protocol_v2 import (
     BOARD_DIS,
     BOARD_VCU,
     SERVICE_UUID as V2_SERVICE_UUID,
+    V2_BMS_BOARDS,
+    V2_BMS_REGISTERS,
     NinebotV2Client,
+    V2Register,
     registers_for_board,
 )
 from .ninebot_ble.serial_parser import SerialParser
@@ -150,6 +154,10 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._preempted = False  # a poll was already cut short for a closer one
         self._last_attempt_rssi: int | None = None  # signal at the last poll
         self._v2_board: int | None = entry.data.get(CONF_V2_BOARD)
+        self._v2_bms_board: int | None = entry.data.get(CONF_V2_BMS_BOARD)
+        # Set once the candidates have all been tried and none answered,
+        # so the probe runs at most once per coordinator instance.
+        self._v2_bms_absent = False
         self._no_button_pairing: bool = bool(
             entry.data.get(CONF_NO_BUTTON_PAIRING, False)
         )
@@ -581,6 +589,11 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """The board this vehicle answers register reads on, once discovered."""
         return self._v2_board
 
+    @property
+    def v2_bms_board(self) -> int | None:
+        """The board the battery pack answers on, or None until one has."""
+        return self._v2_bms_board
+
     async def _find_v2_board(self, client: NinebotV2Client) -> int:
         """Work out which board answers register reads on this vehicle.
 
@@ -610,21 +623,55 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # a useful failure rather than silently doing nothing.
         return BOARD_VCU
 
-    async def _read_all_v2(self, client: NinebotV2Client) -> dict[str, Any]:
-        """Read the documented registers of a newer vehicle."""
-        if client.serial:
-            self.serial = client.serial
-            self.model = self.model or "Ninebot (newer protocol)"
+    async def _find_v2_bms_board(self, client: NinebotV2Client) -> int | None:
+        """Work out which board the battery pack answers on, if this model has one.
 
-        board = await self._find_v2_board(client)
-        registers = registers_for_board(board)
+        Pack voltage has been the longest-standing gap on the newer protocol,
+        and the pack sits on its own board whose index differs per model - an F3
+        answers on 0x07, a Max G3 on none of the candidates. So probe a short
+        list once and remember the answer, rather than assume a number.
+        """
+        if self._v2_bms_board is not None:
+            return self._v2_bms_board
+        if self._v2_bms_absent:
+            return None
+        # Pack voltage: the one register a battery board has to serve, so a
+        # board that answers it with something non-zero is the battery board.
+        probe = V2_BMS_REGISTERS[0]
+        for board in V2_BMS_BOARDS:
+            try:
+                raw = await client.read_register(board, probe.index, probe.length)
+            except Exception:  # noqa: BLE001 - probing, failure is expected
+                continue
+            if len(raw) < probe.length or not any(raw):
+                # An all-zero read means the index is not populated on this board.
+                continue
+            _LOGGER.info("Battery pack answers register reads on board 0x%02X", board)
+            self._v2_bms_board = board
+            self._persist({CONF_V2_BMS_BOARD: board})
+            return board
+        # Nothing answered. Remember that in memory only: re-probing three
+        # boards every poll would waste a vehicle's poll budget forever, but
+        # writing the absence down would hide a pack that a later firmware
+        # exposes, and removing and re-adding the entry is a poor way back.
+        _LOGGER.debug("No battery board answered; not reading pack registers")
+        self._v2_bms_absent = True
+        return None
+
+    async def _read_board(
+        self,
+        client: NinebotV2Client,
+        board: int,
+        registers: tuple[V2Register, ...],
+    ) -> tuple[dict[str, Any], list[str]]:
+        """Read one board's table, returning its values and the keys that failed."""
         data: dict[str, Any] = {}
         failed: list[str] = []
         for reg in registers:
             try:
                 raw = await client.read_register(board, reg.index, reg.length)
             except Exception as err:  # noqa: BLE001 - one bad read must not fail the poll
-                _LOGGER.debug("Failed reading %s: %s", reg.key, err)
+                _LOGGER.debug("Failed reading %s on board 0x%02X: %s", reg.key, board, err)
                 failed.append(reg.key)
                 continue
             if len(raw) < reg.length:
@@ -632,6 +679,26 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 continue
             value = reg.unpack(raw)
             data[reg.key] = round(value * reg.scale, 3) if reg.scale != 1.0 else value
+        return data, failed
+
+    async def _read_all_v2(self, client: NinebotV2Client) -> dict[str, Any]:
+        """Read the documented registers of a newer vehicle."""
+        if client.serial:
+            self.serial = client.serial
+            self.model = self.model or "Ninebot (newer protocol)"
+
+        board = await self._find_v2_board(client)
+        data, failed = await self._read_board(client, board, registers_for_board(board))
+
+        # The battery pack is a second board, read in the same session. A silent
+        # one costs only its own registers, never the poll.
+        bms_board = await self._find_v2_bms_board(client)
+        if bms_board is not None:
+            bms_data, bms_failed = await self._read_board(
+                client, bms_board, V2_BMS_REGISTERS
+            )
+            data.update(bms_data)
+            failed.extend(bms_failed)
 
         if not data:
             raise UpdateFailed(
