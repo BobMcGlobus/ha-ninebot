@@ -97,6 +97,7 @@ is read back and an error is raised if the scooter did not accept it.
 | E / ES / other F series | legacy | Likely to work — untested |
 | **Ninebot F65I** | legacy | ✅ Confirmed working — sensors + controls. Never acknowledges pairing and has no button confirmation; the integration reads it without one |
 | **Segway E110SE** | Encryption2 | ⚠️ Handshake completes with a recovered pairing password, then authentication goes unanswered — [#7](https://github.com/BobMcGlobus/ha-ninebot/issues/7) |
+| **Ninebot F3** | Encryption2 | ✅ Confirmed working — vehicle data plus a battery board: pack voltage, current, capacity, cell voltages, temperatures |
 | **Max G3 / G3 Plus** | Encryption2 | ✅ Confirmed working on **two** scooters — battery, odometer, remaining range, temperature, awake & riding time, each checked against the app's own display. Sensors only, no controls. Needs the app's pairing password if already paired ([see below](#newer-models-and-the-account-lock)) |
 | G2, F2, F65, E-series | Encryption2 | Untested — reports welcome |
 
@@ -272,6 +273,21 @@ you are pairing a fresh one, record it with Android's Bluetooth HCI snoop log an
 ```bash
 python3 tools/extract_pairing_password.py btsnoop_hci.log --name <SERIAL>
 ```
+
+**Once you have the password, you can read the whole capture.** That is how the
+F3's battery board was found — by watching which registers the app asks for,
+rather than sweeping addresses:
+
+```bash
+python3 tools/decode_capture.py capture.log --name <SERIAL> --password <HEX> --all
+```
+
+It prints which registers the app read, which it wrote, and refuses to print
+anything at all if too little of the capture decodes — a wrong password
+otherwise yields a handful of chance matches that look exactly like findings.
+**The password stays on your machine**; share the output, not the key. The write
+commands in that output are the only way to learn how to *change* a setting on
+the newer protocol, which the integration cannot do yet.
 
 This reads the password straight out of the exchange, and verifies it against
 the app's own authentication frame in the same capture before printing it. It

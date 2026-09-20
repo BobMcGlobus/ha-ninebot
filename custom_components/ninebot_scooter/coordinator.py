@@ -158,6 +158,11 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Set once the candidates have all been tried and none answered,
         # so the probe runs at most once per coordinator instance.
         self._v2_bms_absent = False
+        # A board discovered mid-poll changes which entities should exist,
+        # but the entity list is only built at setup. Reload once the poll
+        # is finished - never during it, which is what used to cost people
+        # their pairing password.
+        self._entities_stale = False
         self._no_button_pairing: bool = bool(
             entry.data.get(CONF_NO_BUTTON_PAIRING, False)
         )
@@ -466,6 +471,14 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._failures += 1
             raise UpdateFailed(f"Error communicating with scooter: {err}") from err
 
+        if self._entities_stale:
+            # A board turned up that the entity list does not know about yet.
+            # Scheduling defers this until the poll has returned.
+            self._entities_stale = False
+            if self.config_entry is not None:
+                self.hass.config_entries.async_schedule_reload(
+                    self.config_entry.entry_id
+                )
         self._failures = 0
         self._preempted = False
         self.last_error = None
@@ -618,6 +631,7 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.info("Vehicle answers register reads on board 0x%02X", board)
             self._v2_board = board
             self._persist({CONF_V2_BOARD: board})
+            self._entities_stale = True
             return board
         # Nothing answered; keep the documented default so the poll still reports
         # a useful failure rather than silently doing nothing.
@@ -649,6 +663,7 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.info("Battery pack answers register reads on board 0x%02X", board)
             self._v2_bms_board = board
             self._persist({CONF_V2_BMS_BOARD: board})
+            self._entities_stale = True
             return board
         # Nothing answered. Remember that in memory only: re-probing three
         # boards every poll would waste a vehicle's poll budget forever, but
