@@ -50,6 +50,7 @@ SYNC1 = 0x5A
 VALID_SYNC2 = (0xA5, 0xB5)
 CMD_PRE_COMM = 0x5B
 CMD_SET_PWD = 0x5C
+CMD_AUTH = 0x5D
 
 HOST_TO_CONTROLLER = 0
 CONTROLLER_TO_HOST = 1
@@ -216,6 +217,30 @@ def main() -> int:
     return 1
 
 
+def _verified(
+    candidates: list[bytes],
+    auth_frames: list[bytes],
+    auth: bytes,
+    ecb_input: bytes,
+    serial: str,
+) -> bytes | None:
+    """Return the candidate the app's own AUTH frame decrypts under.
+
+    The app authenticates successfully, so its AUTH frame is encrypted with the
+    right key by definition. Decrypting it with a candidate and finding the
+    vehicle's serial inside proves that candidate - which beats printing a
+    plausible-looking 16 bytes and letting the user find out later, silently.
+    """
+    want = serial.encode()
+    for candidate in candidates:
+        key = derive_key(candidate, auth)
+        for frame in auth_frames:
+            plain = decrypt(frame, key, auth, ecb_input)
+            if plain and want in plain:
+                return candidate
+    return None
+
+
 def _recover(
     name: str,
     generation: str,
@@ -231,15 +256,33 @@ def _recover(
     session_key = derive_key(name.encode(), auth)
     ecb_input = FW_DATA if generation == "gen2" else ZEROS16
 
-    password = None
+    candidates: list[bytes] = []
+    auth_frames: list[bytes] = []
     for frame in outgoing:
         plain = decrypt(frame, session_key, auth, ecb_input)
         if plain is None or len(plain) < 7:
             continue
         if dump_all:
             print("  app ->", describe(plain))
-        if plain[5] == CMD_SET_PWD and plain[2] == 16:
-            password = plain[7:23]
+        # The payload is not always exactly 16 bytes: a 2025 Android build sends
+        # a 32-byte SET_PWD to an F3, with the password in the first half.
+        # Requiring exactly 16 made the tool report "no password found" on a
+        # capture that contained one.
+        if plain[5] == CMD_SET_PWD and plain[2] >= 16:
+            candidates.append(bytes(plain[7:23]))
+        elif plain[5] == CMD_AUTH:
+            auth_frames.append(frame)
+
+    password = _verified(candidates, auth_frames, auth, ecb_input, serial)
+
+    if password is None and candidates:
+        # No AUTH frame to check against; the capture still shows a pairing.
+        password = candidates[-1]
+        print(
+            "\nWARNING: no AUTH frame in this capture, so the password below is "
+            "unverified. If authentication then times out, that is the first "
+            "thing to suspect."
+        )
 
     if password is None:
         print(

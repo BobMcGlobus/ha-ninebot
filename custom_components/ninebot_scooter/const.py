@@ -48,6 +48,8 @@ CONF_POLL_TIMEOUT = "poll_timeout"
 # early costs more than waiting does.
 DEFAULT_POLL_TIMEOUT = 45  # seconds
 MIN_POLL_TIMEOUT = 10
-MAX_POLL_TIMEOUT = 120
+# A first pairing over a Bluetooth proxy can genuinely need minutes: the
+# handshake waits for a button press that may take several tries.
+MAX_POLL_TIMEOUT = 300
 MIN_POLL_INTERVAL = 10
 MAX_POLL_INTERVAL = 3600

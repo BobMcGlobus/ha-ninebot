@@ -4,6 +4,9 @@
   "bluetooth": [
     {
       "manufacturer_id": 16974
+    },
+    {
+      "manufacturer_id": 17230
     }
   ],
   "codeowners": [
@@ -24,5 +27,5 @@
     "sensor-state-data",
     "bluetooth-sensor-state-data"
   ],
-  "version": "0.14.0"
+  "version": "0.14.1"
 }

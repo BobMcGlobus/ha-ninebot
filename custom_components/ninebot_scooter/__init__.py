@@ -54,5 +54,16 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Reload the entry when its options change (e.g. poll interval)."""
+    """Reload the entry when its options change (e.g. poll interval).
+
+    Only on options. The coordinator also writes entry *data* mid-poll - the
+    discovered board, the protocol, the pairing password - and every one of
+    those fired this listener too, reloading the entry and cancelling the poll
+    that was still running. On a first pairing that was destructive: the vehicle
+    had already stored the new password, and the write that would have saved our
+    copy came later in the same poll and never ran.
+    """
+    coordinator = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    if coordinator is not None and coordinator.loaded_options == dict(entry.options):
+        return
     await hass.config_entries.async_reload(entry.entry_id)

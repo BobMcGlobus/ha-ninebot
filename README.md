@@ -261,7 +261,10 @@ result into the **Pairing password** option.
   silently.
 - **On Android, `adb backup` does not work** — Segway ships the app with
   `allowBackup=false`, so the backup comes out empty (a 1 KB file of zeros). Root
-  access is needed to read `/data/data/com.ninebot.segway/shared_prefs/`.
+  access is needed to read `/data/data/com.ninebot.segway/shared_prefs/`. A full
+  **bug report** does work though and needs no root: *Developer options → Bug
+  report → Full*, which contains `FS/data/log/bt/btsnoop_hci.log` — enough for
+  the capture route below. (Thanks @edweiss412.)
 
 **From a first-time pairing capture** — if the scooter has never been paired, or
 you are pairing a fresh one, record it with Android's Bluetooth HCI snoop log and:
@@ -270,8 +273,15 @@ you are pairing a fresh one, record it with Android's Bluetooth HCI snoop log an
 python3 tools/extract_pairing_password.py btsnoop_hci.log --name <SERIAL>
 ```
 
-This reads the password straight out of the exchange. It only works during a
-genuine first pairing: a reconnect never transmits the password. Add `--all` to
+This reads the password straight out of the exchange, and verifies it against
+the app's own authentication frame in the same capture before printing it. It
+only works during a genuine first pairing: a reconnect never transmits the
+password.
+
+> **If the power button never confirms a pairing, go straight to this route.**
+> Some models accept a button confirmation only rarely or not at all — an F3 took
+> about fifteen attempts across three different radios to confirm once. Chasing
+> the button on those is wasted effort. Add `--all` to
 print every decrypted frame, which is also the easiest way to see which boards and
 registers a model really uses.
 

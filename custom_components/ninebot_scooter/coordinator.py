@@ -121,6 +121,12 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.address: str = entry.unique_id  # type: ignore[assignment]
         self._app_key = app_key
         self.protocol: str = entry.data.get(CONF_PROTOCOL, PROTOCOL_LEGACY)
+        # A discovered board is proof the vehicle answered the newer protocol,
+        # so never spend a poll re-trying the classic handshake first. The two
+        # are persisted by different writes and the protocol one can be lost if
+        # a poll is cut short; the board alone is enough to know.
+        if entry.data.get(CONF_V2_BOARD) is not None:
+            self.protocol = PROTOCOL_V2
         self._v2_generation: str | None = entry.data.get(CONF_V2_GENERATION)
         stored_password = entry.data.get(CONF_V2_PASSWORD)
         self._v2_password: bytes | None = (
@@ -132,6 +138,10 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._poll_timeout: float = float(
             entry.options.get(CONF_POLL_TIMEOUT, DEFAULT_POLL_TIMEOUT)
         )
+        # What the entry's options looked like when this coordinator was built.
+        # The listener compares against it to tell a real options change from
+        # the coordinator's own data writes, which must not trigger a reload.
+        self.loaded_options: dict[str, Any] = dict(entry.options)
         self._lock = asyncio.Lock()
         self._last_success = 0.0  # monotonic time of last SUCCESSFUL poll
         self._failures = 0  # consecutive failures, used to back off
@@ -367,26 +377,36 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     ble_device, on_wait_for_button=self._async_ask_for_button
                 )
                 self._dismiss_button_prompt()
+                # Save the password before reading anything. A pairing we just
+                # confirmed exists on the vehicle from this moment on; if the
+                # first read then fails and we never stored it, the scooter is
+                # holding a random key nobody has a copy of and is locked to us
+                # for good. Storing it early costs one write.
+                self._remember_session(client)
                 result = await action(client)
             finally:
                 if client.gatt_services:
                     self.gatt_services = client.gatt_services
                 await client.disconnect()
 
-            updates: dict[str, Any] = {}
-            if client.password and client.password != self._v2_password:
-                self._v2_password = client.password
-                updates[CONF_V2_PASSWORD] = client.password.hex()
-            # Remember the generation so later connections skip the sweep - it is
-            # slow, and holding the adapter that long exhausts proxy slots.
-            if client.generation and client.generation != self._v2_generation:
-                self._v2_generation = client.generation
-                updates[CONF_V2_GENERATION] = client.generation
-            if updates:
-                self._persist(updates)
+            self._remember_session(client)
             if client.serial and not self.serial:
                 self.serial = client.serial
             return result
+
+    def _remember_session(self, client: NinebotV2Client) -> None:
+        """Persist whatever the handshake established, as soon as it is known."""
+        updates: dict[str, Any] = {}
+        if client.password and client.password != self._v2_password:
+            self._v2_password = client.password
+            updates[CONF_V2_PASSWORD] = client.password.hex()
+        # Remember the generation so later connections skip the sweep - it is
+        # slow, and holding the adapter that long exhausts proxy slots.
+        if client.generation and client.generation != self._v2_generation:
+            self._v2_generation = client.generation
+            updates[CONF_V2_GENERATION] = client.generation
+        if updates:
+            self._persist(updates)
 
     @callback
     def _async_ask_for_button(self) -> None:
