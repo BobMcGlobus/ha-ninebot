@@ -593,6 +593,26 @@ def _ride_mode(data: bytes) -> str | int:
     return _RIDE_MODES.get(data[0], data[0])
 
 
+def _s16(data: bytes) -> int:
+    return struct.unpack("<h", data[:2])[0]
+
+
+def _cells(data: bytes) -> list[int]:
+    """The thirteen cell voltages in a 26-byte read, in mV."""
+    return [struct.unpack("<H", data[i : i + 2])[0] for i in range(0, 26, 2)]
+
+
+def _max_temp(data: bytes) -> int | None:
+    """The hottest pack sensor in degC, which is the number the app shows.
+
+    One byte per sensor, 0xFF where a pack does not have that one. None rather
+    than a zero when every byte is absent: 0 degC is a plausible-looking answer
+    and would be indistinguishable from a real reading.
+    """
+    temps = [b for b in data[:8] if b != 0xFF]
+    return max(temps) if temps else None
+
+
 @dataclass(frozen=True, kw_only=True)
 class V2Register:
     """One readable value on a newer vehicle, on a specific board."""
@@ -737,6 +757,117 @@ V2_VCU_REGISTERS: tuple[V2Register, ...] = (
 # 0x6A is 1 only while the pack is taking charge and 0 at 100 % or just after
 # re-plugging - close enough to 0x1C bit 2 that one of the two must be misread,
 # and a single vehicle cannot say which. It stays out until a second one agrees.
+
+# Battery pack. On the newer protocol the pack is a second board behind the one
+# that serves vehicle data, and its index is model-specific: an F3 answers on
+# 0x07, while a Max G3 scanned twice at different states of charge answered on
+# none of these. So this is a candidate list to probe, not a lookup - see
+# NinebotCoordinator._find_v2_bms_board(). It is deliberately not part of
+# _REGISTERS_BY_BOARD, which answers a different question: which single board
+# holds the vehicle's own data.
+V2_BMS_BOARDS: tuple[int, ...] = (0x07, 0x22, 0x23)
+
+# Confirmed on an F3 against the official app's Battery Details page: 0x5B and
+# 0x8C reproduced its 9480 mAh and 53.5 V exactly, and 0x8D moved with the
+# charge current. The first entry is what _find_v2_bms_board() probes with, so
+# keep pack voltage there - it is the one value every BMS has to serve.
+V2_BMS_REGISTERS: tuple[V2Register, ...] = (
+    V2Register(
+        key="Battery voltage",
+        index=0x8C,
+        length=2,
+        unpack=_u16,
+        scale=0.01,
+        unit="V",
+        device_class="voltage",
+        primary=True,
+    ),
+    # Signed: positive while charging, about -0.06 A sitting idle.
+    V2Register(
+        key="Battery current",
+        index=0x8D,
+        length=2,
+        unpack=_s16,
+        scale=0.01,
+        unit="A",
+        device_class="current",
+        primary=True,
+    ),
+    V2Register(
+        key="Remaining capacity",
+        index=0x5B,
+        length=2,
+        unpack=_u16,
+        scale=10,
+        unit="mAh",
+        primary=True,
+    ),
+    V2Register(
+        key="Full capacity",
+        index=0x13,
+        length=2,
+        unpack=_u16,
+        scale=10,
+        unit="mAh",
+    ),
+    # The pack's own state of charge, which need not agree with the vehicle's
+    # 0x55 - hence a separate name rather than a second "Battery".
+    V2Register(
+        key="State of charge",
+        index=0x8F,
+        length=2,
+        unpack=_u16,
+        unit="%",
+        device_class="battery",
+    ),
+    # The app's battery maintenance setting: 80..100 in steps of 5.
+    V2Register(
+        key="Charge limit",
+        index=0x82,
+        length=2,
+        unpack=_u16,
+        unit="%",
+    ),
+    # 0xF9 is [temperature u16, state of charge u8, state of health u8]. The
+    # first two duplicate registers above, so only the health byte is taken.
+    V2Register(
+        key="Battery health",
+        index=0xF9,
+        length=4,
+        unpack=lambda data: data[3],
+        unit="%",
+    ),
+    V2Register(
+        key="Battery temperature",
+        index=0x96,
+        length=16,
+        unpack=_max_temp,
+        unit="\u00b0C",
+        device_class="temperature",
+    ),
+    # Thirteen cell voltages arrive in one 26-byte read, reduced to the two
+    # numbers worth watching: the spread between them is how a failing cell
+    # shows up. This costs a second read of the same register, which is the
+    # price of one value per entry in this table.
+    V2Register(
+        key="Cell voltage min",
+        index=0xA0,
+        length=26,
+        unpack=lambda data: min(_cells(data)),
+        scale=0.001,
+        unit="V",
+        device_class="voltage",
+    ),
+    V2Register(
+        key="Cell voltage max",
+        index=0xA0,
+        length=26,
+        unpack=lambda data: max(_cells(data)),
+        scale=0.001,
+        unit="V",
+        device_class="voltage",
+    ),
+)
 
 # E-series mopeds, which proxy values through the dashboard. These indexes come
 # from the protocol documentation and are NOT confirmed on hardware.

@@ -21,7 +21,7 @@ from .const import DOMAIN, PROTOCOL_V2
 from .coordinator import NinebotCoordinator
 from .entity import NinebotEntity
 from .ninebot_ble import BmsIdx, CtrlIdx, get_register_desc, iter_register
-from .ninebot_ble.protocol_v2 import BOARD_VCU, registers_for_board
+from .ninebot_ble.protocol_v2 import BOARD_VCU, V2_BMS_REGISTERS, registers_for_board
 
 # Registers exposed as writable controls (switch/select/number) instead of sensors.
 _CONTROL_KEYS: set[str] = {
@@ -118,14 +118,21 @@ def _build_descriptions() -> list[NinebotSensorEntityDescription]:
     return descriptions
 
 
-def _build_v2_descriptions(board: int) -> list[NinebotSensorEntityDescription]:
+def _build_v2_descriptions(
+    board: int, bms_board: int | None = None
+) -> list[NinebotSensorEntityDescription]:
     """Descriptions for vehicles speaking the newer protocol.
 
     Which registers exist depends on the board the vehicle answers on, so the
-    entity set is built from that board's table rather than a shared one.
+    entity set is built from that board's table rather than a shared one. The
+    battery pack's table is added only once its board has actually answered, so
+    a model whose pack lives elsewhere gets no entities that never take a value.
     """
+    registers = registers_for_board(board)
+    if bms_board is not None:
+        registers = (*registers, *V2_BMS_REGISTERS)
     descriptions: list[NinebotSensorEntityDescription] = []
-    for reg in registers_for_board(board):
+    for reg in registers:
         descriptions.append(
             NinebotSensorEntityDescription(
                 # Namespaced: several register names exist in both tables, and a
@@ -160,9 +167,15 @@ async def async_setup_entry(
     """Set up the Ninebot sensors."""
     coordinator: NinebotCoordinator = hass.data[DOMAIN][entry.entry_id]
     if coordinator.protocol == PROTOCOL_V2:
-        # Before the first poll the board is unknown; kick scooters are the
-        # common case and a reload follows once it has actually been probed.
-        descriptions = _build_v2_descriptions(coordinator.v2_board or BOARD_VCU)
+        # Before the first poll neither board is known. Kick scooters are the
+        # common case, so guess the VCU for vehicle data; the pack gets nothing
+        # until it has answered. Either board appears on the next setup of the
+        # entry rather than immediately, because discovering one is a data write
+        # and those no longer reload - that is what stopped them cancelling the
+        # poll that had just learned the pairing password.
+        descriptions = _build_v2_descriptions(
+            coordinator.v2_board or BOARD_VCU, coordinator.v2_bms_board
+        )
     else:
         descriptions = _build_descriptions()
 
