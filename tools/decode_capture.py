@@ -105,7 +105,9 @@ def _endpoint(value: int) -> bool:
 def _try_keys(frame: bytes, keys: list[tuple[str, bytes]], auth: bytes, ecb: bytes):
     """Decrypt under whichever key produces a frame that parses."""
     for label, key in keys:
-        plain = decrypt(frame, key, auth, ecb)
+        # Pre-handshake frames are keyed before any challenge exists, so they
+        # carry no auth material in their nonce.
+        plain = decrypt(frame, key, ZEROS16 if label == "handshake" else auth, ecb)
         if plain is None or len(plain) < 7:
             continue
         # A wrong key yields noise. Three things have to agree before a frame
@@ -131,6 +133,11 @@ def main() -> int:
         "--password", required=True, help="32 hex characters, from the app or the extractor"
     )
     parser.add_argument("--all", action="store_true", help="print every frame, not just a summary")
+    parser.add_argument(
+        "--explain",
+        action="store_true",
+        help="on failure, show what the first few frames decoded to under each key",
+    )
     args = parser.parse_args()
 
     try:
@@ -167,7 +174,16 @@ def main() -> int:
         return 1
     print(f"Challenge:  {auth.hex().upper()}")
 
-    keys = [("session", derive_key(password, auth)), ("name", derive_key(args.name.encode(), auth))]
+    # Three keys are in play across one session, and which applies depends on how
+    # far the handshake had got when the frame was sent:
+    #   handshake - before the challenge is known, keyed on the name and fw data
+    #   name      - after it, used for SET_PWD
+    #   session   - after AUTH, used for everything worth reading
+    keys = [
+        ("session", derive_key(password, auth)),
+        ("name", derive_key(args.name.encode(), auth)),
+        ("handshake", derive_key(args.name.encode(), FW_DATA)),
+    ]
 
     # Decode everything first and check how much of it worked. A wrong password
     # decodes a handful of frames by chance, and printing those as findings is
@@ -185,6 +201,32 @@ def main() -> int:
     total = len(sent) + len(received)
     rate = len(decoded) / total if total else 0.0
     print(f"Decoded:    {len(decoded)}/{total} frames ({rate:.0%})")
+    if rate < 0.5 and args.explain:
+        print("\n--- what the first frames decoded to ---------------------------")
+        print("Safe to share: this is derived from the capture, not from your key.\n")
+        for frame in sent[:4]:
+            counter = struct.unpack(">H", frame[-2:])[0]
+            print(f"  raw       {frame.hex().upper()}")
+            print(f"            length byte {frame[2]}, counter {counter}")
+            for label, key in keys:
+                plain = decrypt(
+                    frame, key, ZEROS16 if label == "handshake" else auth, FW_DATA
+                )
+                if plain is None:
+                    print(f"    {label:<8} -> could not decrypt at all")
+                    continue
+                cmd = plain[5]
+                why = []
+                if cmd not in _COMMANDS:
+                    why.append(f"command 0x{cmd:02X} unknown")
+                if plain[2] + 13 != len(frame):
+                    why.append(f"length says {plain[2]} but frame is {len(frame)}")
+                if not _endpoint(plain[3]) or not _endpoint(plain[4]):
+                    why.append(f"endpoints 0x{plain[3]:02X}/0x{plain[4]:02X} implausible")
+                verdict = "accepted" if not why else "rejected: " + ", ".join(why)
+                print(f"    {label:<8} -> {plain[:8].hex().upper()}  {verdict}")
+            print()
+
     if rate < 0.5:
         print(
             "\nToo little of this capture decoded for the results to mean anything.\n"
@@ -193,6 +235,8 @@ def main() -> int:
             "is the entry for\nthis serial, and that the app has not re-paired since.\n"
             "\nThe vehicle name matters too - it must be exactly as advertised."
         )
+        if not args.explain:
+            print("\nRun again with --explain to see what the first frames decoded to.")
         return 1
 
     reads: Counter[tuple[int, int]] = Counter()
