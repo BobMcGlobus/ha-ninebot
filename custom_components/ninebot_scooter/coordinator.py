@@ -693,7 +693,14 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 failed.append(reg.key)
                 continue
             value = reg.unpack(raw)
-            data[reg.key] = round(value * reg.scale, 3) if reg.scale != 1.0 else value
+            # An unpacker may return None for "this register has no value
+            # right now" - a saturated counter, a pack with no sensor fitted.
+            if value is None:
+                data[reg.key] = None
+            else:
+                data[reg.key] = (
+                    round(value * reg.scale, 3) if reg.scale != 1.0 else value
+                )
         return data, failed
 
     async def _read_all_v2(self, client: NinebotV2Client) -> dict[str, Any]:

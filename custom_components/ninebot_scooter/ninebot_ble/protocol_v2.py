@@ -332,30 +332,47 @@ class NinebotV2Client:
                 BOARD_BLE, CMD_AUTH, 0, payload, expect=CMD_AUTH, timeout=4
             )
         except TimeoutError:
-            # Silence here means the vehicle could not authenticate the frame, so
-            # it dropped it without answering - a wrong password looks exactly
-            # like this. Before reporting that, try the name-derived key once:
-            # it costs one frame on a path that has already failed, and it tells
-            # us whether this model keys AUTH differently. Speculative, and the
-            # log says which one answered.
-            _LOGGER.debug("AUTH unanswered under the password key; trying the name key")
-            self.crypto.set_key(name.encode(), self._auth_param)
+            # Some models will not answer AUTH until the password has been
+            # asserted in this session, even when PRE_COMM already reported one
+            # stored. A decrypted capture of the official app on an E110SE shows
+            # it plainly: three AUTH attempts ignored, then SET_PWD, then the
+            # very next AUTH answered. The app sends SET_PWD unconditionally, so
+            # "stored password: True" is not the signal we took it for.
+            #
+            # Re-assert the same password we already hold and try once more.
+            # Doing this only after AUTH has failed matters: on a vehicle that
+            # answers straight away nothing is written, and a password that is
+            # merely wrong cannot quietly replace a working one on the first
+            # poll.
+            _LOGGER.debug("AUTH unanswered; re-asserting the password and retrying")
+            try:
+                await self._request(
+                    BOARD_BLE,
+                    CMD_SET_PWD,
+                    0,
+                    self.password,
+                    expect=CMD_SET_PWD,
+                    timeout=4,
+                )
+            except TimeoutError:
+                _LOGGER.debug("SET_PWD not acknowledged either; continuing anyway")
+            self.crypto.set_key(self.password, self._auth_param)
             try:
                 auth = await self._request(
                     BOARD_BLE, CMD_AUTH, 0, payload, expect=CMD_AUTH, timeout=4
                 )
             except TimeoutError:
                 raise TimeoutError(
-                    "Vehicle did not answer authentication under either key. The "
-                    "usual cause is a wrong pairing password: an AUTH frame the "
-                    "vehicle cannot authenticate is dropped silently rather than "
-                    "refused. Check the password under Configure, and that it was "
-                    "verified against a capture from this vehicle"
+                    "Vehicle did not answer authentication, with or without "
+                    "re-asserting the password first. The usual cause is a wrong "
+                    "pairing password: a frame the vehicle cannot authenticate is "
+                    "dropped silently rather than refused. Check the password "
+                    "under Configure, and that it was verified against a capture "
+                    "from this vehicle"
                 ) from None
-            _LOGGER.warning(
-                "%s authenticated with the name-derived key, not the configured "
-                "password - please report this, it means the model keys AUTH "
-                "differently", self.serial,
+            _LOGGER.info(
+                "%s answered AUTH only after the password was re-asserted",
+                self.serial,
             )
         if auth.index != 1:
             self.password = None  # force a fresh pairing next time
@@ -593,6 +610,17 @@ def _ride_mode(data: bytes) -> str | int:
     return _RIDE_MODES.get(data[0], data[0])
 
 
+def _u16_unless_saturated(data: bytes) -> int | None:
+    """A 15-bit counter that stops at its ceiling rather than wrapping.
+
+    0x7FFF means "longer ago than this can count" (9 h 6 m), not a duration.
+    Reporting the ceiling as a number would have the scooter claim the charger
+    changed exactly 9 h 6 m ago for as long as nothing happens.
+    """
+    value = struct.unpack("<H", data[:2])[0]
+    return None if value >= 0x7FFF else value
+
+
 def _s16(data: bytes) -> int:
     return struct.unpack("<h", data[:2])[0]
 
@@ -727,7 +755,7 @@ V2_VCU_REGISTERS: tuple[V2Register, ...] = (
         key="Time since charger change",
         index=0x69,
         length=2,
-        unpack=_u16,
+        unpack=_u16_unless_saturated,
         unit="s",
         device_class="duration",
     ),

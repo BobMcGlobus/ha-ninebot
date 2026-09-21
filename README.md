@@ -232,6 +232,12 @@ directly. Two ways to obtain it, both requiring access to your own devices:
 python3 tools/recover_password_from_app.py APPDATA --capture btsnoop_hci.log --name <SERIAL>
 ```
 
+> **Re-pairing the official app can invalidate the password you recovered.** The
+> app asserts a password before it authenticates, so a fresh pairing — installing
+> the app on another phone, for instance — can replace the one the vehicle holds.
+> If the integration stops updating after you touched the app, recover the
+> password again rather than assuming the old one still applies.
+
 > A password that is wrong in any byte fails **silently**: the vehicle cannot
 > authenticate the frame, so it drops it without answering, and the symptom is a
 > timeout at authentication rather than a refusal. If setup gets as far as
