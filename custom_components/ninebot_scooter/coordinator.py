@@ -411,6 +411,19 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Persist whatever the handshake established, as soon as it is known."""
         updates: dict[str, Any] = {}
         if client.password and client.password != self._v2_password:
+            if self._v2_password:
+                # Replacing a password the owner configured, with one we
+                # generated. That is legitimate - the vehicle now holds ours and
+                # theirs would no longer work - but it happens silently, and
+                # someone who set a password from the app's own data has no way
+                # to know the field no longer holds what they put there.
+                _LOGGER.warning(
+                    "%s was re-paired, so the pairing password has been replaced "
+                    "with a new one. The value under Configure is no longer the "
+                    "one you entered - use the new one for anything outside Home "
+                    "Assistant, such as decoding a capture",
+                    self.name,
+                )
             self._v2_password = client.password
             updates[CONF_V2_PASSWORD] = client.password.hex()
         # Remember the generation so later connections skip the sweep - it is

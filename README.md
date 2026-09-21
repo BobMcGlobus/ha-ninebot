@@ -232,6 +232,13 @@ directly. Two ways to obtain it, both requiring access to your own devices:
 python3 tools/recover_password_from_app.py APPDATA --capture btsnoop_hci.log --name <SERIAL>
 ```
 
+> **The password shown under *Configure* may not be the one you entered.** If the
+> vehicle is ever re-paired from Home Assistant, the integration generates a new
+> one, stores it, and the field is overwritten. It keeps working here — the
+> vehicle holds the new one — but the old value is what stops matching anywhere
+> else, such as when decoding a capture. Always take the password from the field
+> rather than from your notes.
+
 > **Re-pairing the official app can invalidate the password you recovered.** The
 > app asserts a password before it authenticates, so a fresh pairing — installing
 > the app on another phone, for instance — can replace the one the vehicle holds.
