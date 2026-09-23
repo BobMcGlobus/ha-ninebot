@@ -10,7 +10,6 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 
 from .const import CONF_APP_KEY, DOMAIN, PLATFORMS, PROTOCOL_V2
-from .ninebot_ble import BmsIdx, CtrlIdx, iter_register
 from .services import async_setup_services
 from .coordinator import NinebotCoordinator
 
@@ -55,51 +54,39 @@ def _async_drop_stale_entities(
 ) -> None:
     """Remove entities a vehicle on the newer protocol can never fill.
 
-    Two things leave registry entries behind that will read "unavailable"
-    forever. A vehicle that starts on the classic protocol and is then found to
-    speak the newer one keeps the classic register entities, which nothing
-    writes to again; and the controls only exist for the classic protocol, so on
-    a newer vehicle they are created once and never again.
+    Several things leave dead registry entries behind, and listing them turned
+    out to be the wrong way round: a vehicle that starts on the classic protocol
+    and is then found to speak the newer one keeps its classic entities; the
+    controls are classic-only; the newer protocol's keys were renamed in v0.12.0
+    so the pre-rename ones linger; and registers dropped over time - "Scooter
+    power" - leave entries behind that no table mentions any more. A list of
+    what to delete missed three of those four.
 
-    Neither is harmful, but both are confusing in a way that matters: the device
-    page ends up showing every sensor twice, once dead and once live, and there
-    is no way for the owner to tell which is which.
+    So this states what may EXIST instead. On a vehicle speaking the newer
+    protocol that is the "v2_" register entities and the four that come from the
+    Bluetooth advertisement, which work on any model. Anything else in this
+    entry is left over from a layout we no longer produce.
     """
     if coordinator.protocol != PROTOCOL_V2:
         return
 
     address = entry.unique_id
-    # Exactly the ids the classic platforms would have produced. Anything else -
-    # the newer protocol's own "v2_" entities, and the advertisement-based ones
-    # that work on every model - is left alone.
-    stale = {f"{address}_{idx}" for idx in iter_register(CtrlIdx, BmsIdx)}
-    # Taken from the platforms rather than guessed: lock.py, switch.py's and
-    # select.py's description keys, number.py, and the computed power sensor,
-    # which is also classic-only.
-    stale |= {
-        f"{address}_{suffix}"
-        for suffix in (
-            "lock",             # lock.py
-            "cruise_control",   # switch.py
-            "tail_light",       # switch.py
-            "operating_mode",   # select.py
-            "kers_level",       # select.py
-            "max_speed",        # number.py
-            "speed_release",    # number.py
-            "power",            # sensor.py, voltage x current on the classic path
-        )
-    }
+    # These four are built by sensor.py and binary_sensor.py regardless of
+    # protocol. Add to this set when adding an entity that is not a register.
+    keep = {f"{address}_{suffix}" for suffix in ("in_range", "rssi", "last_seen", "last_updated")}
 
     registry = er.async_get(hass)
     removed = 0
     for reg_entry in er.async_entries_for_config_entry(registry, entry.entry_id):
-        if reg_entry.unique_id in stale:
-            registry.async_remove(reg_entry.entity_id)
-            removed += 1
+        unique_id = reg_entry.unique_id
+        if unique_id in keep or unique_id.startswith(f"{address}_v2_"):
+            continue
+        registry.async_remove(reg_entry.entity_id)
+        removed += 1
     if removed:
         _LOGGER.info(
-            "Removed %d entities belonging to the classic protocol; %s speaks the "
-            "newer one and would never have filled them",
+            "Removed %d entities from an older layout; %s speaks the newer "
+            "protocol and would never have filled them",
             removed,
             entry.title,
         )

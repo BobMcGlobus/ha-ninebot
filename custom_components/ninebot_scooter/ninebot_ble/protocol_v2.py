@@ -787,9 +787,11 @@ V2_VCU_REGISTERS: tuple[V2Register, ...] = (
 # and a single vehicle cannot say which. It stays out until a second one agrees.
 
 # Battery pack. On the newer protocol the pack is a second board behind the one
-# that serves vehicle data, and its index is model-specific: an F3 answers on
-# 0x07, while a Max G3 scanned twice at different states of charge answered on
-# none of these. So this is a candidate list to probe, not a lookup - see
+# that serves vehicle data, and its index is model-specific. An F3 answers on
+# 0x07. A Max G3 was thought not to have one at all, because its owner scanned
+# 0x22 by hand and got nothing - but the probe finds a board there too and reads
+# the whole pack off it, which is a good argument for probing a list rather than
+# concluding anything from one address. So this is a candidate list - see
 # NinebotCoordinator._find_v2_bms_board(). It is deliberately not part of
 # _REGISTERS_BY_BOARD, which answers a different question: which single board
 # holds the vehicle's own data.

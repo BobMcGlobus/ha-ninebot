@@ -98,7 +98,7 @@ is read back and an error is raised if the scooter did not accept it.
 | **Ninebot F65I** | legacy | ✅ Confirmed working — sensors + controls. Never acknowledges pairing and has no button confirmation; the integration reads it without one |
 | **Segway E110SE** | Encryption2 | ⚠️ Handshake completes with a recovered pairing password, then authentication goes unanswered — [#7](https://github.com/BobMcGlobus/ha-ninebot/issues/7) |
 | **Ninebot F3** | Encryption2 | ✅ Confirmed working — vehicle data plus a battery board: pack voltage, current, capacity, cell voltages, temperatures |
-| **Max G3 / G3 Plus** | Encryption2 | ✅ Confirmed working on **two** scooters — battery, odometer, remaining range, temperature, awake & riding time, each checked against the app's own display. Sensors only, no controls. Needs the app's pairing password if already paired ([see below](#newer-models-and-the-account-lock)) |
+| **Max G3 / G3 Plus** | Encryption2 | ✅ Confirmed working on **two** scooters — vehicle data plus the battery board: pack voltage, current, cell voltages, capacities, charger state, ride mode. Sensors only, no controls. Needs the app's pairing password if already paired ([see below](#newer-models-and-the-account-lock)) |
 | G2, F2, F65, E-series | Encryption2 | Untested — reports welcome |
 
 **Works on every model, whatever the protocol:** presence (**In range**),
