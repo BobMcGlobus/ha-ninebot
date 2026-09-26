@@ -12,6 +12,7 @@ import asyncio
 import logging
 import secrets
 import struct
+import warnings
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -108,6 +109,29 @@ def parse_frame(plaintext: bytes) -> Frame | None:
     )
 
 
+
+def _link_mtu(client: BleakClient) -> int | None:
+    """The ATT MTU the link negotiated, or None if the stack does not know it.
+
+    AUTH and SET_PWD are 27 and 29 bytes and must arrive as one write. A link
+    left at the minimum MTU of 23 carries 20 bytes per write, and a frame cut
+    short is dropped by the vehicle without a word - so this is the first thing
+    to know when those two go unanswered while the 13-byte PRE_COMM works.
+
+    A Bluetooth proxy reports the value it negotiated. BlueZ reports 23 as a
+    placeholder until the MTU is acquired, and warns while doing it; that
+    warning is how a placeholder is told apart from a real 23, without reaching
+    into any backend's private state.
+    """
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        try:
+            mtu = int(client.mtu_size)
+        except Exception:  # noqa: BLE001 - diagnostic only
+            return None
+    return None if caught else mtu
+
+
 class NinebotV2Client:
     """Talks Encryption2 to a single vehicle."""
 
@@ -117,6 +141,9 @@ class NinebotV2Client:
         self.crypto = NbCryptoV2()
         self.client: BleakClient | None = None
         self.gatt_services: dict[str, list[str]] = {}
+        # ATT MTU of the link, when the stack actually knows it. None means
+        # the value was a placeholder (BlueZ reports 23 until acquired).
+        self.mtu: int | None = None
         # Session password: reused across connections so the pairing button press
         # is only needed once.
         self.password: bytes | None = password
@@ -150,6 +177,11 @@ class NinebotV2Client:
         name = device.name or ""
         _LOGGER.debug("Connecting to %s (%s)", name, device.address)
         self.client = await establish_connection(BleakClient, device, device.address)
+        self.mtu = _link_mtu(self.client)
+        _LOGGER.debug(
+            "Link MTU %s",
+            self.mtu if self.mtu is not None else "unknown (stack reports a placeholder)",
+        )
 
         self.gatt_services = {
             str(service.uuid): [str(char.uuid) for char in service.characteristics]
@@ -362,6 +394,16 @@ class NinebotV2Client:
                     BOARD_BLE, CMD_AUTH, 0, payload, expect=CMD_AUTH, timeout=4
                 )
             except TimeoutError:
+                # SET_PWD is the larger of the two at 29 bytes, so that is the bar.
+                if self.mtu is not None and self.mtu - 3 < 29:
+                    raise TimeoutError(
+                        f"Vehicle did not answer authentication. This link reports "
+                        f"an MTU of {self.mtu}, which carries {self.mtu - 3} bytes "
+                        f"per write, and the authentication frames are 27 and 29 - "
+                        f"they cannot arrive whole, and a partial frame is dropped "
+                        f"silently. If you connect through a Bluetooth proxy, try a "
+                        f"local adapter or a proxy that negotiates a larger MTU"
+                    ) from None
                 raise TimeoutError(
                     "Vehicle did not answer authentication, with or without "
                     "re-asserting the password first. The usual cause is a wrong "

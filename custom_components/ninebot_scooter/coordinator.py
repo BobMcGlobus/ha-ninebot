@@ -151,6 +151,7 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._failures = 0  # consecutive failures, used to back off
         self._last_attempt = 0.0  # monotonic time of the last poll ATTEMPT
         self._legacy_worked = False  # the classic protocol has answered here
+        self.link_mtu: int | None = None  # ATT MTU of the last newer-protocol link
         self._preempted = False  # a poll was already cut short for a closer one
         self._last_attempt_rssi: int | None = None  # signal at the last poll
         self._v2_board: int | None = entry.data.get(CONF_V2_BOARD)
@@ -400,6 +401,8 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             finally:
                 if client.gatt_services:
                     self.gatt_services = client.gatt_services
+                    # Only once connected: before that there is no link to measure.
+                    self.link_mtu = client.mtu
                 await client.disconnect()
 
             self._remember_session(client)
