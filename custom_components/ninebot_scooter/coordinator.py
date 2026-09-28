@@ -2,8 +2,10 @@
 
 Polling is passive/advertisement-driven: Home Assistant listens for the scooter's
 Bluetooth advertisement and only opens a connection when the scooter is actually
-seen (awake and in range), throttled to the configured interval. There is no
-periodic timer, so a sleeping scooter is never dialled.
+seen (awake and in range), throttled to the configured interval. A parked
+scooter's advertisement stops changing, and Home Assistant stops reporting it,
+so a timer looks in on it - but only while it is still being heard, so a
+sleeping scooter is never dialled.
 """
 from __future__ import annotations
 
@@ -23,6 +25,7 @@ from homeassistant.components.bluetooth import (
 from homeassistant.components.bluetooth.match import BluetoothCallbackMatcher
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
+from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
@@ -37,6 +40,7 @@ from .const import (
     CONF_V2_PASSWORD,
     DEFAULT_POLL_INTERVAL,
     DEFAULT_POLL_TIMEOUT,
+    MIN_POLL_INTERVAL,
     PROTOCOL_LEGACY,
     PROTOCOL_V2,
 )
@@ -73,6 +77,14 @@ _STALLED_POLL_SECONDS = 8.0
 # Anything asking "is it here right now" needs a bound that does not depend on
 # how chatty the device happens to be.
 _PRESENCE_TIMEOUT = timedelta(minutes=5)
+
+# How often to look in on a scooter that is still being heard. Home Assistant
+# only reports an advertisement that has changed, and a parked scooter's does
+# not, so without this it is read once after a restart and never again. The
+# poll gate decides whether a read is due; this only has to be fine enough not
+# to stretch the owner's interval. Ticking at the interval itself would read
+# every other tick at best, as the throttle counts from the end of the last poll.
+_PARKED_CHECK = timedelta(seconds=MIN_POLL_INTERVAL)
 
 # Budget held back from the poll timeout so that, when the classic handshake
 # fails, there is still time to try the newer protocol within the same poll.
@@ -215,7 +227,20 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             bluetooth.async_track_unavailable(
                 self.hass, self._async_on_unavailable, self.address, connectable=False
             ),
+            async_track_time_interval(
+                self.hass, self._async_check_parked, _PARKED_CHECK
+            ),
         ]
+        # Newer cores can also report every packet, changed or not, which looks
+        # in on a parked scooter as soon as a read is due instead of at the next
+        # tick. The timer stays for the cores that cannot.
+        register_every_packet = getattr(
+            bluetooth, "async_register_advertisement_callback", None
+        )
+        if register_every_packet is not None:
+            unsubs.append(
+                register_every_packet(self.hass, self._async_check_parked, self.address)
+            )
 
         @callback
         def _unsub() -> None:
@@ -242,7 +267,46 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._last_attempt_rssi is not None
             and service_info.rssi - self._last_attempt_rssi >= _ARRIVAL_RSSI_GAIN
         )
+        self._async_maybe_poll(service_info.rssi, arrived=arrived)
 
+    @callback
+    def _async_check_parked(self, *_: Any) -> None:
+        """Poll a scooter that is still advertising but has stopped changing.
+
+        Called by the timer and, on newer cores, for every packet. Either is
+        only a cue to look at the manager's record: a packet arrives once for
+        each adapter that hears it, before the manager has picked the best, so
+        its own signal may be a distant proxy's.
+        """
+        service_info = bluetooth.async_last_service_info(
+            self.hass, self.address, connectable=False
+        )
+        if service_info is None:
+            return
+        # The manager can keep a device for hours after its last packet - the
+        # reason in_range has a bound of its own - so hold to that bound rather
+        # than dial a scooter that has gone to sleep.
+        age = time.monotonic() - service_info.time
+        if age > _PRESENCE_TIMEOUT.total_seconds():
+            return
+        # Catch presence up from the packet itself, or a scooter read every few
+        # minutes would still show as out of range. The poll publishes it;
+        # publishing here would rewrite "Last seen" on every tick.
+        self._in_range = True
+        self.rssi = service_info.rssi
+        self.last_seen = dt_util.utcnow() - timedelta(seconds=age)
+        # Never an arrival. The record switches between adapters as their
+        # signal comes and goes, and a switch is not the scooter moving; only a
+        # changed advertisement may cut a running poll short, as before.
+        if self._async_maybe_poll(service_info.rssi):
+            _LOGGER.debug(
+                "Polling %s: still advertising, but nothing in it has changed",
+                self.address,
+            )
+
+    @callback
+    def _async_maybe_poll(self, rssi: int, *, arrived: bool = False) -> bool:
+        """Start a poll unless one is running or the last was too recent."""
         running = self._poll_task is not None and not self._poll_task.done()
         if running:
             stalled = time.monotonic() - self._last_attempt >= _STALLED_POLL_SECONDS
@@ -252,7 +316,7 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # starves the poll: it is restarted forever and never completes, so
             # the coordinator reports neither data nor an error.
             if not (arrived and stalled) or self._preempted:
-                return
+                return False
             # Started while the scooter was out of reach and still has not
             # finished; the signal we have now is far better than the one it is
             # struggling with. Drop it and read from where we actually are.
@@ -260,7 +324,7 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "Cancelling stalled poll of %s: signal improved %d -> %d dBm",
                 self.address,
                 self._last_attempt_rssi,
-                service_info.rssi,
+                rssi,
             )
             self._preempted = True
             self._poll_task.cancel()
@@ -276,13 +340,14 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             interval = self._min_interval
             since = time.monotonic() - self._last_success
         if since < interval and not arrived:
-            return
+            return False
 
         self._last_attempt = time.monotonic()
-        self._last_attempt_rssi = service_info.rssi
+        self._last_attempt_rssi = rssi
         self._poll_task = self.hass.async_create_task(
             self._run_poll(), "ninebot_scooter poll", eager_start=False
         )
+        return True
 
     async def _run_poll(self) -> None:
         """Refresh, but never hold the poll slot indefinitely."""
