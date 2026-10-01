@@ -66,6 +66,22 @@ an explicit error rather than a silent no-op.
 The **polling interval** (default 30 s) is configurable under the integration's
 **Configure** button.
 
+The **parked polling interval** (in minutes, default 0 = off), also under
+**Configure**, reads a scooter that is parked but still in Bluetooth range.
+Without it a parked scooter is read when it turns up and then not again until it
+is ridden, or leaves and comes back: Home Assistant only passes on an
+advertisement that has changed, and a parked scooter's does not. **10 minutes**
+is the suggested value if you want it, for example to follow a charge. It never
+reads more often than the polling interval. Two things to know before turning it
+on:
+
+- **A sleeping scooter wakes up for each read, and some models chime when they
+  do.** An F3 chimes once per read, and read every 5 minutes it never went back
+  to sleep at all.
+- **Whether a read keeps an older model from switching itself off is not yet
+  known.** If it does, a G30D or another classic model left switched on would
+  never power off and would drain its battery. Reports either way are welcome.
+
 ### Normal mode speed limit (disabled by default)
 
 `number.<scooter>_normal_mode_speed_limit` writes the scooter's normal-mode speed

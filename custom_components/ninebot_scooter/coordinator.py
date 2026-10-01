@@ -4,8 +4,11 @@ Polling is passive/advertisement-driven: Home Assistant listens for the scooter'
 Bluetooth advertisement and only opens a connection when the scooter is actually
 seen (awake and in range), throttled to the configured interval. A parked
 scooter's advertisement stops changing, and Home Assistant stops reporting it,
-so a timer looks in on it - but only while it is still being heard, so a
-sleeping scooter is never dialled.
+so it is read once and then left alone. Owners who want it read anyway can set
+a parked interval, in minutes: a timer then reads it on that schedule, and only
+while it is still being heard. Being heard is not being awake - an F3
+advertises while asleep and wakes, chiming, for the read - which is why that
+timer is off unless asked for.
 """
 from __future__ import annotations
 
@@ -30,6 +33,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    CONF_PARKED_POLL_INTERVAL,
     CONF_POLL_INTERVAL,
     CONF_POLL_TIMEOUT,
     CONF_PROTOCOL,
@@ -38,6 +42,7 @@ from .const import (
     CONF_V2_BOARD,
     CONF_V2_GENERATION,
     CONF_V2_PASSWORD,
+    DEFAULT_PARKED_POLL_INTERVAL,
     DEFAULT_POLL_INTERVAL,
     DEFAULT_POLL_TIMEOUT,
     MIN_POLL_INTERVAL,
@@ -78,12 +83,10 @@ _STALLED_POLL_SECONDS = 8.0
 # how chatty the device happens to be.
 _PRESENCE_TIMEOUT = timedelta(minutes=5)
 
-# How often to look in on a scooter that is still being heard. Home Assistant
-# only reports an advertisement that has changed, and a parked scooter's does
-# not, so without this it is read once after a restart and never again. The
-# poll gate decides whether a read is due; this only has to be fine enough not
-# to stretch the owner's interval. Ticking at the interval itself would read
-# every other tick at best, as the throttle counts from the end of the last poll.
+# How often the parked timer looks in, when the owner has set a parked interval.
+# Each tick is only a dictionary lookup; whether a read is due is decided against
+# the parked interval, so this only has to be fine enough not to stretch it.
+# Ticking at the interval itself would add up to a whole interval to every gap.
 _PARKED_CHECK = timedelta(seconds=MIN_POLL_INTERVAL)
 
 # Budget held back from the poll timeout so that, when the classic handshake
@@ -153,6 +156,10 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         self._poll_timeout: float = float(
             entry.options.get(CONF_POLL_TIMEOUT, DEFAULT_POLL_TIMEOUT)
+        )
+        # Stored in minutes, kept in seconds; 0 leaves a parked scooter alone.
+        self._parked_interval: float = 60 * float(
+            entry.options.get(CONF_PARKED_POLL_INTERVAL, DEFAULT_PARKED_POLL_INTERVAL)
         )
         # What the entry's options looked like when this coordinator was built.
         # The listener compares against it to tell a real options change from
@@ -227,19 +234,14 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             bluetooth.async_track_unavailable(
                 self.hass, self._async_on_unavailable, self.address, connectable=False
             ),
-            async_track_time_interval(
-                self.hass, self._async_check_parked, _PARKED_CHECK
-            ),
         ]
-        # Newer cores can also report every packet, changed or not, which looks
-        # in on a parked scooter as soon as a read is due instead of at the next
-        # tick. The timer stays for the cores that cannot.
-        register_every_packet = getattr(
-            bluetooth, "async_register_advertisement_callback", None
-        )
-        if register_every_packet is not None:
+        # Only when asked for: a read can wake a sleeping scooter, and some
+        # chime when it does.
+        if self._parked_interval:
             unsubs.append(
-                register_every_packet(self.hass, self._async_check_parked, self.address)
+                async_track_time_interval(
+                    self.hass, self._async_check_parked, _PARKED_CHECK
+                )
             )
 
         @callback
@@ -270,13 +272,12 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._async_maybe_poll(service_info.rssi, arrived=arrived)
 
     @callback
-    def _async_check_parked(self, *_: Any) -> None:
-        """Poll a scooter that is still advertising but has stopped changing.
+    def _async_check_parked(self, _now: datetime | None = None) -> None:
+        """Read a scooter that is still advertising but has stopped changing.
 
-        Called by the timer and, on newer cores, for every packet. Either is
-        only a cue to look at the manager's record: a packet arrives once for
-        each adapter that hears it, before the manager has picked the best, so
-        its own signal may be a distant proxy's.
+        Called by the parked timer, which only runs when the owner has set a
+        parked interval. It works from the manager's record of the scooter, not
+        from any one packet.
         """
         service_info = bluetooth.async_last_service_info(
             self.hass, self.address, connectable=False
@@ -285,7 +286,7 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
         # The manager can keep a device for hours after its last packet - the
         # reason in_range has a bound of its own - so hold to that bound rather
-        # than dial a scooter that has gone to sleep.
+        # than dial a scooter that is no longer being heard.
         age = time.monotonic() - service_info.time
         if age > _PRESENCE_TIMEOUT.total_seconds():
             return
@@ -295,6 +296,14 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._in_range = True
         self.rssi = service_info.rssi
         self.last_seen = dt_util.utcnow() - timedelta(seconds=age)
+        # Every connection may wake the scooter, whether or not the read then
+        # succeeds, so count from the last attempt as well as the last success:
+        # a failed read is not retried any sooner than a good one is repeated.
+        # Never more often than the normal interval either, and the gate's own
+        # back-off after failures can stretch it further.
+        since = time.monotonic() - max(self._last_success, self._last_attempt)
+        if since < max(self._parked_interval, self._min_interval):
+            return
         # Never an arrival. The record switches between adapters as their
         # signal comes and goes, and a switch is not the scooter moving; only a
         # changed advertisement may cut a running poll short, as before.
