@@ -24,12 +24,15 @@ from homeassistant.helpers.selector import (
 )
 
 from .const import (
+    CONF_PARKED_POLL_INTERVAL,
     CONF_POLL_INTERVAL,
     CONF_POLL_TIMEOUT,
     CONF_V2_PASSWORD,
+    DEFAULT_PARKED_POLL_INTERVAL,
     DEFAULT_POLL_INTERVAL,
     DEFAULT_POLL_TIMEOUT,
     DOMAIN,
+    MAX_PARKED_POLL_INTERVAL,
     MAX_POLL_INTERVAL,
     MAX_POLL_TIMEOUT,
     MIN_POLL_INTERVAL,
@@ -191,6 +194,9 @@ class NinebotOptionsFlow(OptionsFlow):
         current_timeout = self.config_entry.options.get(
             CONF_POLL_TIMEOUT, DEFAULT_POLL_TIMEOUT
         )
+        current_parked = self.config_entry.options.get(
+            CONF_PARKED_POLL_INTERVAL, DEFAULT_PARKED_POLL_INTERVAL
+        )
         schema = vol.Schema(
             {
                 vol.Required(CONF_POLL_INTERVAL, default=current): NumberSelector(
@@ -199,6 +205,19 @@ class NinebotOptionsFlow(OptionsFlow):
                         max=MAX_POLL_INTERVAL,
                         step=5,
                         unit_of_measurement="s",
+                        mode=NumberSelectorMode.BOX,
+                    )
+                ),
+                # Reads a vehicle that is parked but still heard, in minutes; 0
+                # is off. A read can wake a sleeping vehicle, and some chime.
+                vol.Required(
+                    CONF_PARKED_POLL_INTERVAL, default=current_parked
+                ): NumberSelector(
+                    NumberSelectorConfig(
+                        min=0,
+                        max=MAX_PARKED_POLL_INTERVAL,
+                        step=1,
+                        unit_of_measurement="min",
                         mode=NumberSelectorMode.BOX,
                     )
                 ),

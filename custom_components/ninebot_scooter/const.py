@@ -54,3 +54,18 @@ MIN_POLL_TIMEOUT = 10
 MAX_POLL_TIMEOUT = 300
 MIN_POLL_INTERVAL = 10
 MAX_POLL_INTERVAL = 3600
+
+CONF_PARKED_POLL_INTERVAL = "parked_poll_interval"
+# Minutes between reads of a vehicle that is parked but still heard; 0 is off.
+# Home Assistant only reports an advertisement that has changed, so without this
+# a parked vehicle is read when it turns up and then not again until it is
+# ridden, or leaves and comes back.
+#
+# Off by default: a sleeping F3 wakes and chimes on every read, and whether a
+# read keeps the classic models (G30D and the like) from switching themselves
+# off is unknown. If it does, a scooter left on at home drains its battery.
+# 10 is the suggested value for owners who want a parked vehicle read. The
+# default lives only here, so once a G30D confirms that auto-off still works,
+# turning it on for everyone is this one line.
+DEFAULT_PARKED_POLL_INTERVAL = 0  # minutes, 0 = off
+MAX_PARKED_POLL_INTERVAL = 1440  # one day

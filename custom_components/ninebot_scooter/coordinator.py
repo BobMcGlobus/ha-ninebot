@@ -2,8 +2,13 @@
 
 Polling is passive/advertisement-driven: Home Assistant listens for the scooter's
 Bluetooth advertisement and only opens a connection when the scooter is actually
-seen (awake and in range), throttled to the configured interval. There is no
-periodic timer, so a sleeping scooter is never dialled.
+seen (awake and in range), throttled to the configured interval. A parked
+scooter's advertisement stops changing, and Home Assistant stops reporting it,
+so it is read once and then left alone. Owners who want it read anyway can set
+a parked interval, in minutes: a timer then reads it on that schedule, and only
+while it is still being heard. Being heard is not being awake - an F3
+advertises while asleep and wakes, chiming, for the read - which is why that
+timer is off unless asked for.
 """
 from __future__ import annotations
 
@@ -23,10 +28,12 @@ from homeassistant.components.bluetooth import (
 from homeassistant.components.bluetooth.match import BluetoothCallbackMatcher
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
+from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    CONF_PARKED_POLL_INTERVAL,
     CONF_POLL_INTERVAL,
     CONF_POLL_TIMEOUT,
     CONF_PROTOCOL,
@@ -35,8 +42,10 @@ from .const import (
     CONF_V2_BOARD,
     CONF_V2_GENERATION,
     CONF_V2_PASSWORD,
+    DEFAULT_PARKED_POLL_INTERVAL,
     DEFAULT_POLL_INTERVAL,
     DEFAULT_POLL_TIMEOUT,
+    MIN_POLL_INTERVAL,
     PROTOCOL_LEGACY,
     PROTOCOL_V2,
 )
@@ -73,6 +82,12 @@ _STALLED_POLL_SECONDS = 8.0
 # Anything asking "is it here right now" needs a bound that does not depend on
 # how chatty the device happens to be.
 _PRESENCE_TIMEOUT = timedelta(minutes=5)
+
+# How often the parked timer looks in, when the owner has set a parked interval.
+# Each tick is only a dictionary lookup; whether a read is due is decided against
+# the parked interval, so this only has to be fine enough not to stretch it.
+# Ticking at the interval itself would add up to a whole interval to every gap.
+_PARKED_CHECK = timedelta(seconds=MIN_POLL_INTERVAL)
 
 # Budget held back from the poll timeout so that, when the classic handshake
 # fails, there is still time to try the newer protocol within the same poll.
@@ -141,6 +156,10 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         self._poll_timeout: float = float(
             entry.options.get(CONF_POLL_TIMEOUT, DEFAULT_POLL_TIMEOUT)
+        )
+        # Stored in minutes, kept in seconds; 0 leaves a parked scooter alone.
+        self._parked_interval: float = 60 * float(
+            entry.options.get(CONF_PARKED_POLL_INTERVAL, DEFAULT_PARKED_POLL_INTERVAL)
         )
         # What the entry's options looked like when this coordinator was built.
         # The listener compares against it to tell a real options change from
@@ -216,6 +235,14 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self.hass, self._async_on_unavailable, self.address, connectable=False
             ),
         ]
+        # Only when asked for: a read can wake a sleeping scooter, and some
+        # chime when it does.
+        if self._parked_interval:
+            unsubs.append(
+                async_track_time_interval(
+                    self.hass, self._async_check_parked, _PARKED_CHECK
+                )
+            )
 
         @callback
         def _unsub() -> None:
@@ -242,7 +269,53 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._last_attempt_rssi is not None
             and service_info.rssi - self._last_attempt_rssi >= _ARRIVAL_RSSI_GAIN
         )
+        self._async_maybe_poll(service_info.rssi, arrived=arrived)
 
+    @callback
+    def _async_check_parked(self, _now: datetime | None = None) -> None:
+        """Read a scooter that is still advertising but has stopped changing.
+
+        Called by the parked timer, which only runs when the owner has set a
+        parked interval. It works from the manager's record of the scooter, not
+        from any one packet.
+        """
+        service_info = bluetooth.async_last_service_info(
+            self.hass, self.address, connectable=False
+        )
+        if service_info is None:
+            return
+        # The manager can keep a device for hours after its last packet - the
+        # reason in_range has a bound of its own - so hold to that bound rather
+        # than dial a scooter that is no longer being heard.
+        age = time.monotonic() - service_info.time
+        if age > _PRESENCE_TIMEOUT.total_seconds():
+            return
+        # Catch presence up from the packet itself, or a scooter read every few
+        # minutes would still show as out of range. The poll publishes it;
+        # publishing here would rewrite "Last seen" on every tick.
+        self._in_range = True
+        self.rssi = service_info.rssi
+        self.last_seen = dt_util.utcnow() - timedelta(seconds=age)
+        # Every connection may wake the scooter, whether or not the read then
+        # succeeds, so count from the last attempt as well as the last success:
+        # a failed read is not retried any sooner than a good one is repeated.
+        # Never more often than the normal interval either, and the gate's own
+        # back-off after failures can stretch it further.
+        since = time.monotonic() - max(self._last_success, self._last_attempt)
+        if since < max(self._parked_interval, self._min_interval):
+            return
+        # Never an arrival. The record switches between adapters as their
+        # signal comes and goes, and a switch is not the scooter moving; only a
+        # changed advertisement may cut a running poll short, as before.
+        if self._async_maybe_poll(service_info.rssi):
+            _LOGGER.debug(
+                "Polling %s: still advertising, but nothing in it has changed",
+                self.address,
+            )
+
+    @callback
+    def _async_maybe_poll(self, rssi: int, *, arrived: bool = False) -> bool:
+        """Start a poll unless one is running or the last was too recent."""
         running = self._poll_task is not None and not self._poll_task.done()
         if running:
             stalled = time.monotonic() - self._last_attempt >= _STALLED_POLL_SECONDS
@@ -252,7 +325,7 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # starves the poll: it is restarted forever and never completes, so
             # the coordinator reports neither data nor an error.
             if not (arrived and stalled) or self._preempted:
-                return
+                return False
             # Started while the scooter was out of reach and still has not
             # finished; the signal we have now is far better than the one it is
             # struggling with. Drop it and read from where we actually are.
@@ -260,7 +333,7 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "Cancelling stalled poll of %s: signal improved %d -> %d dBm",
                 self.address,
                 self._last_attempt_rssi,
-                service_info.rssi,
+                rssi,
             )
             self._preempted = True
             self._poll_task.cancel()
@@ -276,13 +349,14 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             interval = self._min_interval
             since = time.monotonic() - self._last_success
         if since < interval and not arrived:
-            return
+            return False
 
         self._last_attempt = time.monotonic()
-        self._last_attempt_rssi = service_info.rssi
+        self._last_attempt_rssi = rssi
         self._poll_task = self.hass.async_create_task(
             self._run_poll(), "ninebot_scooter poll", eager_start=False
         )
+        return True
 
     async def _run_poll(self) -> None:
         """Refresh, but never hold the poll slot indefinitely."""
