@@ -66,6 +66,12 @@ an explicit error rather than a silent no-op.
 The **polling interval** (default 30 s) is configurable under the integration's
 **Configure** button.
 
+**In range**, **Last seen** and **Signal strength** stay current for a parked
+scooter whatever this is set to. They come from Home Assistant's own record of
+the scooter's Bluetooth packets and need no connection, so they wake nothing.
+Last seen is refreshed every few minutes while the scooter stands still, and
+In range switches off about five minutes after the last packet.
+
 The **parked polling interval** (in minutes, default 0 = off), also under
 **Configure**, reads a scooter that is parked but still in Bluetooth range.
 Without it a parked scooter is read when it turns up and then not again until it

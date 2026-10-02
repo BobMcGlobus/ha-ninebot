@@ -89,6 +89,16 @@ _PRESENCE_TIMEOUT = timedelta(minutes=5)
 # Ticking at the interval itself would add up to a whole interval to every gap.
 _PARKED_CHECK = timedelta(seconds=MIN_POLL_INTERVAL)
 
+# Presence is kept current separately from any reading, because it needs no
+# connection: the manager already records every packet, changed or not, and the
+# callback above only hears about the changed ones. Looking that record up wakes
+# nothing and makes nothing chime, so it runs for every scooter regardless of
+# the parked interval. Publishing is rarer than looking: a flip of In range goes
+# out at once, otherwise Last seen and the signal are refreshed every few
+# minutes, which keeps a parked scooter's history from filling up.
+_PRESENCE_REFRESH = timedelta(seconds=60)
+_PRESENCE_PUBLISH_EVERY = 300.0  # seconds
+
 # Budget held back from the poll timeout so that, when the classic handshake
 # fails, there is still time to try the newer protocol within the same poll.
 _V2_FALLBACK_RESERVE = 25.0
@@ -172,6 +182,8 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._legacy_worked = False  # the classic protocol has answered here
         self.link_mtu: int | None = None  # ATT MTU of the last newer-protocol link
         self._preempted = False  # a poll was already cut short for a closer one
+        self._presence_shown: bool | None = None  # In range as last published
+        self._presence_published = 0.0  # monotonic time of that publish
         self._last_attempt_rssi: int | None = None  # signal at the last poll
         self._v2_board: int | None = entry.data.get(CONF_V2_BOARD)
         self._v2_bms_board: int | None = entry.data.get(CONF_V2_BMS_BOARD)
@@ -237,6 +249,11 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         ]
         # Only when asked for: a read can wake a sleeping scooter, and some
         # chime when it does.
+        unsubs.append(
+            async_track_time_interval(
+                self.hass, self._async_refresh_presence, _PRESENCE_REFRESH
+            )
+        )
         if self._parked_interval:
             unsubs.append(
                 async_track_time_interval(
@@ -270,6 +287,37 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             and service_info.rssi - self._last_attempt_rssi >= _ARRIVAL_RSSI_GAIN
         )
         self._async_maybe_poll(service_info.rssi, arrived=arrived)
+
+    @callback
+    def _async_refresh_presence(self, _now: datetime | None = None) -> None:
+        """Keep In range, Last seen and the signal current without connecting.
+
+        A parked scooter keeps advertising the same bytes, Home Assistant stops
+        passing them on, and the three presence entities froze at the moment it
+        arrived - "last seen 9 hours ago" for a scooter standing next to the
+        adapter. Nothing here opens a connection.
+        """
+        service_info = bluetooth.async_last_service_info(
+            self.hass, self.address, connectable=False
+        )
+        if service_info is not None:
+            age = time.monotonic() - service_info.time
+            if age <= _PRESENCE_TIMEOUT.total_seconds():
+                heard = dt_util.utcnow() - timedelta(seconds=age)
+                if self.last_seen is None or heard > self.last_seen:
+                    self.last_seen = heard
+                self._in_range = True
+                self.rssi = service_info.rssi
+
+        in_range = self.in_range
+        if not in_range:
+            # A signal reading next to "not in range" is a contradiction.
+            self.rssi = None
+        due = time.monotonic() - self._presence_published >= _PRESENCE_PUBLISH_EVERY
+        if in_range != self._presence_shown or (in_range and due):
+            self._presence_shown = in_range
+            self._presence_published = time.monotonic()
+            self.async_update_listeners()
 
     @callback
     def _async_check_parked(self, _now: datetime | None = None) -> None:
