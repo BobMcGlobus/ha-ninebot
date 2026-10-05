@@ -58,6 +58,18 @@ class DeviceId(enum.Enum):
     """Mobile phone linked through Bluetooth serial port (BLE)"""
 
 
+# Commands whose payload is key material: PING sends the app key, and the reply
+# to INIT returns the vehicle's BLE key. Never log their payloads.
+_KEY_BEARING = (Command.INIT, Command.PING)
+
+
+def _redacted_hex(frame: bytes) -> str:
+    """Hex of a decrypted frame, with the payload hidden if it carries a key."""
+    if len(frame) > 7 and frame[5] in {c.value for c in _KEY_BEARING}:
+        return f"{hexlify(frame[:7]).upper().decode()}<{len(frame) - 7} bytes redacted>"
+    return hexlify(frame).upper().decode()
+
+
 class Packet:
     MAGIC = [0x5A, 0xA5]
     """All packets sent to scooter must start with this preamble."""
@@ -94,7 +106,12 @@ class Packet:
     def __str__(self) -> str:
         ds = ""
         if len(self.data_segment) > 0:
-            ds = ", data=" + hexlify(bytes(self.data_segment)).upper().decode()
+            if self.command in _KEY_BEARING:
+                # PING carries the app key, the INIT reply the vehicle's BLE key.
+                # Debug logs get posted in public issues; these must not be in them.
+                ds = f", data=<{len(self.data_segment)} bytes redacted>"
+            else:
+                ds = ", data=" + hexlify(bytes(self.data_segment)).upper().decode()
         return (
             f"Packet[{self.source.name} -> {self.target.name},"
             f" cmd={self.command.name}, idx={self.data_index:02X}{ds}]"
@@ -174,7 +191,7 @@ class NinebotClient:
         received_key = resp.data_segment[:16]
         received_serial = resp.data_segment[16:]
 
-        _LOGGER.debug("> BLE Key: %s", hexlify(bytes(received_key)).upper().decode())
+        _LOGGER.debug("> BLE key received (%d bytes)", len(received_key))
         _LOGGER.debug("> Serial: %s", bytes(received_serial).decode())
         self.crypto.set_ble_data(received_key)
 
@@ -423,7 +440,7 @@ class NinebotClient:
 
         decrypted = self.crypto.decrypt(self.receive_buffer)
         total_len = self.receive_buffer[2] + 7
-        _LOGGER.debug(f"Decrypted {len(decrypted)}/{total_len}: {hexlify(decrypted).upper().decode()}")
+        _LOGGER.debug("Decrypted %d/%d: %s", len(decrypted), total_len, _redacted_hex(bytes(decrypted)))
         if len(decrypted) == total_len:
             packet = Packet.unpack(decrypted)
             if packet is None:

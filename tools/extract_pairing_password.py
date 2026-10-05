@@ -62,6 +62,9 @@ class AttPayload:
 
     outgoing: bool
     data: bytes
+    # Capture timestamp in microseconds. Lets a decoder put both directions back
+    # in the order they happened, so a write can be paired with its reply.
+    ts: int = 0
 
 
 def read_btsnoop(path: pathlib.Path) -> list[AttPayload]:
@@ -77,7 +80,7 @@ def read_btsnoop(path: pathlib.Path) -> list[AttPayload]:
     expected: dict[tuple[bool, int], int] = {}
 
     while offset + 24 <= len(raw):
-        _orig_len, incl_len, flags, _drops, _ts = struct.unpack_from(">IIIIq", raw, offset)
+        _orig_len, incl_len, flags, _drops, ts = struct.unpack_from(">IIIIq", raw, offset)
         offset += 24
         packet = raw[offset : offset + incl_len]
         offset += incl_len
@@ -120,9 +123,9 @@ def read_btsnoop(path: pathlib.Path) -> list[AttPayload]:
 
         opcode = att[0]
         if opcode in (0x12, 0x52) and len(att) > 3:  # write request / command
-            payloads.append(AttPayload(True, att[3:]))
+            payloads.append(AttPayload(True, att[3:], ts))
         elif opcode in (0x1B, 0x1D) and len(att) > 3:  # notification / indication
-            payloads.append(AttPayload(False, att[3:]))
+            payloads.append(AttPayload(False, att[3:], ts))
 
     return payloads
 
@@ -257,7 +260,6 @@ def _recover(
     ecb_input = FW_DATA if generation == "gen2" else ZEROS16
 
     candidates: list[bytes] = []
-    auth_frames: list[bytes] = []
     for frame in outgoing:
         plain = decrypt(frame, session_key, auth, ecb_input)
         if plain is None or len(plain) < 7:
@@ -270,10 +272,21 @@ def _recover(
         # capture that contained one.
         if plain[5] == CMD_SET_PWD and plain[2] >= 16:
             candidates.append(bytes(plain[7:23]))
-        elif plain[5] == CMD_AUTH:
-            auth_frames.append(frame)
+
+    # AUTH is encrypted with the password, not with the session key used above,
+    # so it never decodes in that loop - collecting it there meant this list was
+    # always empty and no password was ever verified. Pick AUTH out by shape
+    # instead: its payload is the 14-character serial, and it is sent with a
+    # sequence counter, unlike the handshake frame.
+    auth_frames = [
+        frame
+        for frame in outgoing
+        if len(frame) > 9 and frame[2] == 14 and struct.unpack(">H", frame[-2:])[0] != 0
+    ]
 
     password = _verified(candidates, auth_frames, auth, ecb_input, serial)
+    if password is not None:
+        print("\nVerified: the app's own AUTH frame in this capture decrypts under it.")
 
     if password is None and candidates:
         # No AUTH frame to check against; the capture still shows a pairing.

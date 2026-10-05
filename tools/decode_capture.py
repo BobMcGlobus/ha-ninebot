@@ -50,6 +50,8 @@ build_nonce = _extract.build_nonce
 decrypt = _extract.decrypt
 derive_key = _extract.derive_key
 extract_frames = _extract.extract_frames
+SYNC1 = _extract.SYNC1
+VALID_SYNC2 = _extract.VALID_SYNC2
 read_btsnoop = _extract.read_btsnoop
 
 CMD_READ = 0x01
@@ -88,6 +90,12 @@ def _describe(plain: bytes) -> str:
     length, source, target, command, index = plain[2], plain[3], plain[4], plain[5], plain[6]
     payload = plain[7 : 7 + length]
     name = _COMMANDS.get(command, f"cmd 0x{command:02X}")
+    if command == CMD_SET_PWD and length:
+        # The output of this tool is meant to be shared; the password is not.
+        return (
+            f"{name:<9} {_board(source):<16} -> {_board(target):<16} "
+            f"reg 0x{index:02X}  <{length} bytes redacted>"
+        )
     line = (
         f"{name:<9} {_board(source):<16} -> {_board(target):<16} "
         f"reg 0x{index:02X}  {payload.hex().upper()}"
@@ -95,6 +103,38 @@ def _describe(plain: bytes) -> str:
     if command in _WRITES and len(payload) >= 2:
         line += f"   = {struct.unpack('<H', payload[:2])[0]}"
     return line
+
+
+def _frames_in_order(payloads) -> list[tuple[int, bool, bytes]]:
+    """Reassemble both directions and merge them back into capture order.
+
+    Each direction is a byte stream that has to be split into frames on its own,
+    but reading them out one direction after the other put every reply far away
+    from the request it answers, which made it impossible to tell which write a
+    given acknowledgement belonged to. A frame takes the timestamp of the packet
+    that completed it.
+    """
+    merged: list[tuple[int, bool, bytes]] = []
+    for outgoing in (True, False):
+        stream = bytearray()
+        stamps: list[int] = []
+        for entry in payloads:
+            if entry.outgoing == outgoing:
+                stream += entry.data
+                stamps += [entry.ts] * len(entry.data)
+        index = 0
+        while index < len(stream) - 2:
+            if stream[index] == SYNC1 and stream[index + 1] in VALID_SYNC2:
+                total = stream[index + 2] + 13
+                if index + total <= len(stream):
+                    merged.append(
+                        (stamps[index + total - 1], outgoing, bytes(stream[index : index + total]))
+                    )
+                    index += total
+                    continue
+            index += 1
+    merged.sort(key=lambda item: item[0])
+    return merged
 
 
 def _endpoint(value: int) -> bool:
@@ -188,15 +228,16 @@ def main() -> int:
     # Decode everything first and check how much of it worked. A wrong password
     # decodes a handful of frames by chance, and printing those as findings is
     # worse than printing nothing: they look exactly like real ones.
-    decoded: list[tuple[str, bytes]] = []
+    decoded: list[tuple[float, str, bytes]] = []
     undecodable = 0
-    for direction, frames in (("app ->", sent), ("  <- veh", received)):
-        for frame in frames:
-            _, plain = _try_keys(frame, keys, auth, FW_DATA)
-            if plain is None:
-                undecodable += 1
-            else:
-                decoded.append((direction, plain))
+    ordered = _frames_in_order(payloads)
+    start = ordered[0][0] if ordered else 0
+    for stamp, outgoing, frame in ordered:
+        _, plain = _try_keys(frame, keys, auth, FW_DATA)
+        if plain is None:
+            undecodable += 1
+        else:
+            decoded.append(((stamp - start) / 1e6, "app ->" if outgoing else "  <- veh", plain))
 
     total = len(sent) + len(received)
     rate = len(decoded) / total if total else 0.0
@@ -240,18 +281,18 @@ def main() -> int:
         return 1
 
     reads: Counter[tuple[int, int]] = Counter()
-    writes: list[tuple[int, int, bytes]] = []
+    writes: list[tuple[float, int, int, bytes]] = []
     if args.all:
-        print("\n--- every frame ------------------------------------------------")
-    for direction, plain in decoded:
+        print("\n--- every frame, in capture order ------------------------------")
+    for seconds, direction, plain in decoded:
         if args.all:
-            print(f"{direction} {_describe(plain)}")
+            print(f"{seconds:8.2f}s {direction} {_describe(plain)}")
         command, index = plain[5], plain[6]
         if direction.startswith("app"):
             if command == CMD_READ:
                 reads[(plain[4], index)] += 1
             elif command in _WRITES:
-                writes.append((plain[4], index, bytes(plain[7 : 7 + plain[2]])))
+                writes.append((seconds, plain[4], index, bytes(plain[7 : 7 + plain[2]])))
 
     print("\n--- registers the app READ -------------------------------------")
     if reads:
@@ -262,11 +303,14 @@ def main() -> int:
 
     print("\n--- registers the app WROTE ------------------------------------")
     if writes:
-        for board, index, payload in writes:
+        for seconds, board, index, payload in writes:
             value = (
                 f"   = {struct.unpack('<H', payload[:2])[0]}" if len(payload) >= 2 else ""
             )
-            print(f"  {_board(board):<16} reg 0x{index:02X}   {payload.hex().upper()}{value}")
+            print(
+                f"  {seconds:8.1f}s  {_board(board):<16} reg 0x{index:02X}   "
+                f"{payload.hex().upper()}{value}"
+            )
         print(
             "\n  These are the commands this project cannot issue yet on the newer "
             "protocol.\n  Please include this section when reporting."

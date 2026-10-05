@@ -110,6 +110,17 @@ def parse_frame(plaintext: bytes) -> Frame | None:
 
 
 
+def _loggable(plaintext: bytes) -> str:
+    """Hex of an outgoing frame, with the pairing password hidden.
+
+    SET_PWD carries the password in clear before encryption, and debug logs end
+    up attached to public issues. One did, with the password in it.
+    """
+    if len(plaintext) > 7 and plaintext[5] == CMD_SET_PWD:
+        return f"{plaintext[:7].hex().upper()}<{len(plaintext) - 7} bytes redacted>"
+    return plaintext.hex().upper()
+
+
 def _link_mtu(client: BleakClient) -> int | None:
     """The ATT MTU the link negotiated, or None if the stack does not know it.
 
@@ -542,7 +553,7 @@ class NinebotV2Client:
         data = self.crypto.encrypt(plaintext)
         _LOGGER.debug(
             "TX plain %s -> enc %s (%d bytes, %s)",
-            plaintext.hex().upper(),
+            _loggable(plaintext),
             data.hex().upper(),
             len(data),
             "with response" if self._write_with_response else "no response",
