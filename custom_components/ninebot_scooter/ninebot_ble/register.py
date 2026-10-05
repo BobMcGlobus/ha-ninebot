@@ -157,8 +157,15 @@ def _unpack_LE16_bitfield_bool(data: list[int], pos: int) -> bool:
     return (word & (1 << pos)) > 0
 
 
-def _unpack_op_mode(data: list[int]) -> OperationMode:
-    return OperationMode(_unpack_LE16(data))
+def _unpack_op_mode(data: list[int]) -> OperationMode | int:
+    # A Max G2 reports 4 here, which is none of the three modes this table knows.
+    # Pass an unknown value through rather than fail the read on every poll; the
+    # ride-mode select shows it as unknown.
+    value = _unpack_LE16(data)
+    try:
+        return OperationMode(value)
+    except ValueError:
+        return value
 
 
 def _unpack_U32_from2LE16(data: list[int]) -> int:
@@ -173,8 +180,22 @@ def _unpack_version(data: list[int]) -> str:
     return f"{val >> 8}.{(val >> 4) & 0x0F}.{(val) & 0x0F}"
 
 
-def _unpack_kers_level(data: list[int]) -> KersLevel:
-    return KersLevel(_unpack_LE16(data))
+def _unpack_kers_level(data: list[int]) -> KersLevel | int:
+    value = _unpack_LE16(data)
+    try:
+        return KersLevel(value)
+    except ValueError:
+        return value
+
+
+def _unpack_hex_version(data: list[int]) -> str:
+    """A version stored as hex digits, one per component: 0x1758 is 1.7.5.8.
+
+    Read as a plain number it showed as 5976 on a Max G2, where the app says
+    1.7.5.8, and as 344 on a G30D, which decodes the same way to 1.5.8.
+    """
+    digits = f"{_unpack_LE16(data):X}"
+    return ".".join(digits)
 
 
 _CTRL_TABLE: dict[CtrlIdx, RegDesc[Any]] = {
@@ -257,7 +278,7 @@ _CTRL_TABLE: dict[CtrlIdx, RegDesc[Any]] = {
     CtrlIdx.NB_INF_AVRSPEED: RegDesc(
         0x65, 1, 2, _unpack_LE16, scaler=lambda x: x / 10, unit=Units.SPEED_KILOMETERS_PER_HOUR
     ),
-    CtrlIdx.NB_INF_VER_BMS2: RegDesc(0x66, 1, 2, _unpack_LE16),
+    CtrlIdx.NB_INF_VER_BMS2: RegDesc(0x66, 1, 2, _unpack_hex_version),
     CtrlIdx.NB_INF_VER_BLE: RegDesc(0x68, 1, 2, _unpack_version),
     CtrlIdx.NB_CTL_LIMIT_SPD: RegDesc(
         0x72, 1, 2, _unpack_LES16, scaler=lambda x: x / 10, unit=Units.SPEED_KILOMETERS_PER_HOUR
@@ -298,7 +319,7 @@ _CTRL_TABLE: dict[CtrlIdx, RegDesc[Any]] = {
 
 _BATT_TABLE: dict[BmsIdx, RegDesc[Any]] = {
     BmsIdx.BAT_SN: RegDesc(0x10, 7, 2, _unpack_hex),
-    BmsIdx.BAT_SW_VER: RegDesc(0x17, 1, 2, _unpack_LE16),
+    BmsIdx.BAT_SW_VER: RegDesc(0x17, 1, 2, _unpack_hex_version),
     BmsIdx.BAT_CAPACITY: RegDesc(0x18, 1, 2, _unpack_LE16),
     BmsIdx.BAT_OVERFLOW_TIMES: RegDesc(0x1F, 1, 2, _unpack_LE16, scaler=lambda x: x & 0xFF),
     BmsIdx.BAT_OVERDISCHARGE_TIMES: RegDesc(0x1F, 1, 2, _unpack_LE16, scaler=lambda x: (x >> 8) & 0xFF),

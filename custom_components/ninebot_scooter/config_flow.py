@@ -21,6 +21,9 @@ from homeassistant.helpers.selector import (
     NumberSelector,
     NumberSelectorConfig,
     NumberSelectorMode,
+    TextSelector,
+    TextSelectorConfig,
+    TextSelectorType,
 )
 
 from .const import (
@@ -168,7 +171,14 @@ class NinebotOptionsFlow(OptionsFlow):
             # A pairing password belongs with the device rather than the options,
             # and the protocol layer needs it as 16 raw bytes - so reject anything
             # that isn't, instead of breaking setup later.
+            # Absent and empty mean different things. An empty field is the owner
+            # clearing it; a missing one is a caller that did not send it - an
+            # API call setting the poll interval, say - and must not delete a key
+            # that may have taken a capture to recover.
+            submitted = CONF_V2_PASSWORD in user_input
             password = str(user_input.pop(CONF_V2_PASSWORD, "") or "").replace(" ", "")
+            if not submitted:
+                password = self.config_entry.data.get(CONF_V2_PASSWORD, "")
             if password:
                 try:
                     if len(bytes.fromhex(password)) != 16:
@@ -241,7 +251,7 @@ class NinebotOptionsFlow(OptionsFlow):
                 vol.Optional(
                     CONF_V2_PASSWORD,
                     default=self.config_entry.data.get(CONF_V2_PASSWORD, ""),
-                ): str,
+                ): TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD)),
             }
         )
         return self.async_show_form(

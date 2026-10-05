@@ -879,8 +879,11 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if self.serial is None:
                 try:
                     raw_serial = await client.read_reg(CtrlIdx.NB_INF_SN)
-                    parsed = SerialParser(raw_serial)
+                    # Keep the serial even when its series is one the parser does
+                    # not know (a Max G2 starts "02G"). Storing it only after a
+                    # successful parse meant re-reading it on every poll, forever.
                     self.serial = raw_serial
+                    parsed = SerialParser(raw_serial)
                     self.model = str(parsed)
                     self.hw_version = (
                         f"Rev {parsed.product_revision}, "

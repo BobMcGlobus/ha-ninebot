@@ -101,7 +101,14 @@ class Packet:
         segment_len = data[2]
         if len(data) < 7 + segment_len:
             return None
-        return Packet(DeviceId(data[3]), DeviceId(data[4]), Command(data[5]), data[6], list(data[7:]))
+        try:
+            source, target, command = DeviceId(data[3]), DeviceId(data[4]), Command(data[5])
+        except ValueError:
+            # Scooters push packets of their own - a Max G2 sends 0x6E and 0x21
+            # unprompted - and raising here meant raising inside the Bluetooth
+            # notify callback. Nothing we sent is waiting on these; drop them.
+            return None
+        return Packet(source, target, command, data[6], list(data[7:]))
 
     def __str__(self) -> str:
         ds = ""
@@ -444,7 +451,10 @@ class NinebotClient:
         if len(decrypted) == total_len:
             packet = Packet.unpack(decrypted)
             if packet is None:
-                _LOGGER.warning("Failed to decode received packet")
+                _LOGGER.debug(
+                    "Ignoring packet with unknown board or command (cmd 0x%02X)",
+                    decrypted[5] if len(decrypted) > 5 else -1,
+                )
             else:
                 await self.receive_queue.put(packet)
         elif len(decrypted) >= total_len:
