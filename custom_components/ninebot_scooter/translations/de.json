@@ -32,7 +32,7 @@
         "data_description": {
           "poll_interval": "Wie oft der Roller (wenn wach) verbunden und ausgelesen wird. Kleiner = reaktionsschneller, aber mehr Bluetooth-Last und Akkuverbrauch.",
           "parked_poll_interval": "Wie oft der Roller ausgelesen wird, solange er abgestellt, aber noch in Bluetooth-Reichweite ist. 0 schaltet das ab. Ein schlafender Roller wacht für jeden Abruf auf, und manche Modelle geben dabei einen Signalton ab. Ob ein Abruf ältere Modelle davon abhält, sich selbst abzuschalten, ist noch nicht bekannt.",
-          "v2_password": "Nur nötig für Scooter, die bereits mit der offiziellen Segway-Ninebot-App verknüpft sind und deshalb kein neues Pairing annehmen: neuere Modelle wie der Max G3 und klassische wie der Max G2. Der Wert <SERIAL>_decrypt aus der App, 32 Hex-Zeichen. Sonst leer lassen.",
+          "v2_password": "Nur nötig für Scooter, die bereits mit der offiziellen Segway-Ninebot-App verknüpft sind und deshalb kein neues Pairing annehmen: neuere Modelle wie der Max G3 und klassische wie der Max G2. Der Wert SERIAL_decrypt aus der App, 32 Hex-Zeichen. Sonst leer lassen.",
           "poll_timeout": "Wie lange ein einzelner Abruf dauern darf, bevor er abgebrochen wird. Ein Abruf, der während der Vorbeifahrt gestartet wurde, würde sonst den nächsten blockieren. Begrenzt auch das Pairing-Fenster beim ersten Mal: dieser Wert minus 25 s - also erhöhen, wenn du länger brauchst, um den Power-Knopf zu drücken."
         }
       }
