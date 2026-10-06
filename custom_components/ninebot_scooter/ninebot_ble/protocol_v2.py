@@ -68,7 +68,10 @@ BOARD_BLE = 0x04
 
 # Commands
 CMD_READ = 0x01
+CMD_WRITE = 0x02         # write and wait for an acknowledgement (reply 0x05)
+CMD_WRITE_NO_REPLY = 0x03  # write with no reply
 CMD_READ_RESP = 0x04
+CMD_WRITE_RESP = 0x05
 CMD_PRE_COMM = 0x5B
 CMD_SET_PWD = 0x5C
 CMD_AUTH = 0x5D
@@ -511,6 +514,30 @@ class NinebotV2Client:
             board, CMD_READ, index, bytes([length]), expect=CMD_READ_RESP
         )
         return response.payload[:length]
+
+    async def write_register(
+        self, board: int, index: int, value: int, *, length: int = 2, acked: bool = True
+    ) -> bool:
+        """Write a little-endian value to a register and confirm it took.
+
+        The official app uses two write commands: 0x02, which the vehicle
+        acknowledges with 0x05, and 0x03, which it does not answer. Either way
+        it reads the register straight back, so we do the same and report whether
+        the value actually changed. A caller that cannot read a value back
+        (nothing to compare) still gets the acknowledgement.
+        """
+        payload = value.to_bytes(length, "little")
+        if acked:
+            await self._request(board, CMD_WRITE, index, payload, expect=CMD_WRITE_RESP)
+        else:
+            self._drain()
+            await self._send(self._frame(board, CMD_WRITE_NO_REPLY, index, payload))
+            await asyncio.sleep(0.2)
+        try:
+            readback = await self.read_register(board, index, length)
+        except Exception:  # noqa: BLE001 - some registers do not read back
+            return True
+        return int.from_bytes(readback[:length], "little") == value
 
     # -- framing ---------------------------------------------------------------
 
@@ -1034,3 +1061,71 @@ _REGISTERS_BY_BOARD: dict[int, tuple[V2Register, ...]] = {
 def registers_for_board(board: int) -> tuple[V2Register, ...]:
     """Return the register table belonging to a board, VCU being the default."""
     return _REGISTERS_BY_BOARD.get(board, V2_VCU_REGISTERS)
+
+
+# --- Controls (newer protocol) ----------------------------------------------
+# Writable settings, each confirmed against a capture of the official app
+# changing it on a Max G3 (#8). Only settings whose register, value range and
+# effect are unambiguous are listed; anything whose purpose is unclear is left
+# out, because a wrong value in an unknown register is the one way to brick a
+# setting. "board" says which board the register lives on: the VCU, or the
+# battery pack (whose index is model-specific and probed, like the sensors).
+
+BOARD_KIND_VCU = "vcu"
+BOARD_KIND_BMS = "bms"
+
+
+@dataclass(frozen=True, kw_only=True)
+class V2NumberControl:
+    """A numeric setting exposed as a number entity."""
+
+    key: str
+    board: str
+    index: int
+    minimum: int
+    maximum: int
+    step: int = 1
+    unit: str | None = None
+    acked: bool = True
+    # Settings that affect how fast the scooter goes ship disabled, like the
+    # legacy speed-limit entity, and carry the same warning.
+    sensitive: bool = False
+
+
+@dataclass(frozen=True, kw_only=True)
+class V2SelectControl:
+    """A choice setting exposed as a select entity. ``options`` maps label->value."""
+
+    key: str
+    board: str
+    index: int
+    options: dict[str, int]
+    acked: bool = False
+    sensitive: bool = False
+
+
+V2_NUMBER_CONTROLS: tuple[V2NumberControl, ...] = (
+    V2NumberControl(
+        key="Charge limit", board=BOARD_KIND_BMS, index=0x82,
+        minimum=80, maximum=100, step=5, unit="%",
+    ),
+    V2NumberControl(
+        key="Auto power-off", board=BOARD_KIND_VCU, index=0x49,
+        minimum=1, maximum=30, step=1, unit="min", acked=False,
+    ),
+    V2NumberControl(
+        key="Sound volume", board=BOARD_KIND_VCU, index=0x76,
+        minimum=5, maximum=100, step=1, unit="%", acked=False,
+    ),
+)
+
+V2_SELECT_CONTROLS: tuple[V2SelectControl, ...] = (
+    V2SelectControl(
+        key="Ride mode", board=BOARD_KIND_VCU, index=0x70,
+        options={"Eco": 0, "Drive": 1, "Sport": 2},
+    ),
+    V2SelectControl(
+        key="Start speed", board=BOARD_KIND_VCU, index=0x42,
+        options={"3 km/h": 3, "4 km/h": 4, "5 km/h": 5},
+    ),
+)

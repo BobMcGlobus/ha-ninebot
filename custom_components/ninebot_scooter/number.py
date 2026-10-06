@@ -22,6 +22,7 @@ from .const import DOMAIN, PROTOCOL_V2, MAX_SPEED_LIMIT, MIN_SPEED_LIMIT
 from .coordinator import NinebotCoordinator
 from .entity import NinebotEntity
 from .ninebot_ble import CtrlIdx
+from .ninebot_ble.protocol_v2 import V2_NUMBER_CONTROLS
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -45,7 +46,9 @@ async def async_setup_entry(
     """Set up the Ninebot number entities."""
     coordinator: NinebotCoordinator = hass.data[DOMAIN][entry.entry_id]
     if coordinator.protocol == PROTOCOL_V2:
-        # Write support for the newer protocol is not implemented yet.
+        async_add_entities(
+            NinebotV2Number(coordinator, control) for control in V2_NUMBER_CONTROLS
+        )
         return
     async_add_entities(
         [NinebotMaxSpeedNumber(coordinator), NinebotSpeedReleaseNumber(coordinator)]
@@ -148,3 +151,47 @@ class NinebotSpeedReleaseNumber(NinebotEntity, NumberEntity):
             raise HomeAssistantError(
                 f"Scooter did not accept the value (it now reports {readback})"
             )
+
+
+class NinebotV2Number(NinebotEntity, NumberEntity):
+    """A numeric setting on a newer-protocol scooter, from V2_NUMBER_CONTROLS."""
+
+    _attr_mode = NumberMode.BOX
+    _attr_entity_category = EntityCategory.CONFIG
+
+    def __init__(self, coordinator: NinebotCoordinator, control) -> None:
+        super().__init__(coordinator)
+        self._control = control
+        self._attr_name = control.key
+        self._attr_native_min_value = control.minimum
+        self._attr_native_max_value = control.maximum
+        self._attr_native_step = control.step
+        self._attr_native_unit_of_measurement = control.unit
+        self._attr_unique_id = f"{coordinator.address}_v2ctl_{control.index:02X}"
+        # Settings that change how fast the scooter goes ship disabled, like the
+        # legacy speed-limit entity.
+        self._attr_entity_registry_enabled_default = not control.sensitive
+
+    @property
+    def native_value(self) -> float | None:
+        return (self.coordinator.data or {}).get(self._control.key)
+
+    @property
+    def available(self) -> bool:
+        board = self.coordinator.v2_board_for(self._control.board)
+        return super().available and board is not None
+
+    async def async_set_native_value(self, value: float) -> None:
+        board = self.coordinator.v2_board_for(self._control.board)
+        if board is None:
+            raise HomeAssistantError(
+                f"{self._control.key} is not available on this scooter"
+            )
+        ok = await self.coordinator.async_write_v2(
+            board, self._control.index, int(value), acked=self._control.acked
+        )
+        if not ok:
+            raise HomeAssistantError(
+                f"The scooter did not accept {self._control.key} = {int(value)}"
+            )
+        await self.coordinator.async_request_refresh()

@@ -44,12 +44,26 @@ and raises an error if the scooter did not accept the change.
 - **Cruise control** (switch)
 - **Tail light** (switch)
 
-> **Controls exist for the classic protocol only.** Models on the newer encrypted
-> protocol — Max G3 and relatives — are read-only for now: the integration can
-> poll every sensor it knows, but sends nothing back. Writing needs a capture of
-> the official app changing a setting, so the command is known rather than
-> guessed. See [#8](https://github.com/BobMcGlobus/ha-ninebot/issues/8) if you can
-> help with that.
+#### Controls on the newer protocol (Max G3 and relatives)
+
+A capture of the official app changing settings on a Max G3 ([#8](https://github.com/BobMcGlobus/ha-ninebot/issues/8))
+showed exactly how it writes each one, so these are reproduced byte for byte —
+the integration sends the same command the app does, and reads the value back to
+confirm it took:
+
+- **Ride mode** (select): Eco / Drive / Sport
+- **Start speed** (select): 3 / 4 / 5 km/h
+- **Charge limit** (number): 80–100 %
+- **Auto power-off** (number): 1–30 min
+- **Sound volume** (number): 5–100 %
+
+Only settings whose register, range and effect are unambiguous are exposed.
+Several more that the app writes — the on/off switches for traction control,
+hill-hold, the alarm and the lights, the per-mode speed limits, and a few
+registers whose purpose is not yet clear — are deliberately left out until each
+is confirmed, because a wrong value in a register whose meaning is uncertain is
+the one way to put a setting into a state the app cannot undo. They will be added
+as they are pinned down.
 
 Not every model pairs the same way. A G30D registers Home Assistant when you
 press its power button; an **F65I never acknowledges pairing at all**, and a short

@@ -15,6 +15,7 @@ from .coordinator import NinebotCoordinator
 from .entity import NinebotEntity
 from .ninebot_ble import CtrlIdx
 from .ninebot_ble.register import KersLevel, OperationMode
+from .ninebot_ble.protocol_v2 import V2_SELECT_CONTROLS
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -60,7 +61,9 @@ async def async_setup_entry(
     """Set up the Ninebot selects."""
     coordinator: NinebotCoordinator = hass.data[DOMAIN][entry.entry_id]
     if coordinator.protocol == PROTOCOL_V2:
-        # Write support for the newer protocol is not implemented yet.
+        async_add_entities(
+            NinebotV2Select(coordinator, control) for control in V2_SELECT_CONTROLS
+        )
         return
     async_add_entities(NinebotSelect(coordinator, desc) for desc in SELECTS)
 
@@ -100,3 +103,44 @@ class NinebotSelect(NinebotEntity, SelectEntity):
             raise HomeAssistantError(
                 f"Scooter did not accept '{option}' (it now reports {readback})"
             )
+
+
+class NinebotV2Select(NinebotEntity, SelectEntity):
+    """A choice setting on a newer-protocol scooter, from V2_SELECT_CONTROLS."""
+
+    _attr_entity_category = EntityCategory.CONFIG
+
+    def __init__(self, coordinator: NinebotCoordinator, control) -> None:
+        super().__init__(coordinator)
+        self._control = control
+        self._attr_name = control.key
+        self._attr_options = list(control.options)
+        self._attr_unique_id = f"{coordinator.address}_v2ctl_{control.index:02X}"
+        self._attr_entity_registry_enabled_default = not control.sensitive
+        self._from_value = {v: k for k, v in control.options.items()}
+
+    @property
+    def current_option(self) -> str | None:
+        value = (self.coordinator.data or {}).get(self._control.key)
+        return self._from_value.get(value)
+
+    @property
+    def available(self) -> bool:
+        board = self.coordinator.v2_board_for(self._control.board)
+        return super().available and board is not None
+
+    async def async_select_option(self, option: str) -> None:
+        board = self.coordinator.v2_board_for(self._control.board)
+        if board is None:
+            raise HomeAssistantError(
+                f"{self._control.key} is not available on this scooter"
+            )
+        value = self._control.options[option]
+        ok = await self.coordinator.async_write_v2(
+            board, self._control.index, value, acked=self._control.acked
+        )
+        if not ok:
+            raise HomeAssistantError(
+                f"The scooter did not accept {self._control.key} = {option}"
+            )
+        await self.coordinator.async_request_refresh()

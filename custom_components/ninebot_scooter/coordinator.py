@@ -691,6 +691,22 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
         )
 
+    def v2_board_for(self, board_kind: str) -> int | None:
+        """The actual board index for a control's VCU/BMS kind on this vehicle."""
+        if board_kind == BOARD_KIND_BMS:
+            return self._v2_bms_board
+        return self._v2_board
+
+    async def async_write_v2(
+        self, board: int, index: int, value: int, *, length: int = 2, acked: bool = True
+    ) -> bool:
+        """Write a register on a newer-protocol vehicle, confirming the change."""
+        return await self._with_v2_client(
+            lambda client: client.write_register(
+                board, index, value, length=length, acked=acked
+            )
+        )
+
     async def async_scan(
         self, board: int, start: int, count: int, length: int
     ) -> dict[int, bytes]:
@@ -888,6 +904,22 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
             data.update(bms_data)
             failed.extend(bms_failed)
+
+        # The current value of each control, so its entity shows where the
+        # setting stands. A control on the battery board is skipped when that
+        # board did not answer. These must not fail the poll - a model may not
+        # have every one - so a silent control is simply left unset.
+        for control in (*V2_NUMBER_CONTROLS, *V2_SELECT_CONTROLS):
+            ctrl_board = bms_board if control.board == BOARD_KIND_BMS else board
+            if ctrl_board is None:
+                continue
+            try:
+                raw = await client.read_register(ctrl_board, control.index, 2)
+            except Exception as err:  # noqa: BLE001
+                _LOGGER.debug("Control %s did not read: %s", control.key, err)
+                continue
+            if len(raw) >= 2:
+                data[control.key] = int.from_bytes(raw[:2], "little")
 
         if not data:
             raise UpdateFailed(
