@@ -180,6 +180,7 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._failures = 0  # consecutive failures, used to back off
         self._last_attempt = 0.0  # monotonic time of the last poll ATTEMPT
         self._legacy_worked = False  # the classic protocol has answered here
+        self._switched_off = False  # last classic poll found only the BLE board awake
         self.link_mtu: int | None = None  # ATT MTU of the last newer-protocol link
         self._preempted = False  # a poll was already cut short for a closer one
         self._presence_shown: bool | None = None  # In range as last published
@@ -619,6 +620,7 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Poll the vehicle, using whichever protocol it speaks."""
+        self._switched_off = False
         try:
             if self.protocol == PROTOCOL_V2:
                 data = await self._with_v2_client(self._read_all_v2)
@@ -644,7 +646,10 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._failures = 0
         self._preempted = False
         self.last_error = None
-        self.last_update_time = dt_util.utcnow()
+        if not self._switched_off:
+            # Nothing was read from a switched-off scooter; what is shown is as
+            # old as it was before this poll.
+            self.last_update_time = dt_util.utcnow()
         self._last_success = time.monotonic()
         return data
 
@@ -899,6 +904,20 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return data
 
     async def _read_all_legacy(self, client: NinebotClient) -> dict[str, Any]:
+            # Switched off, a scooter can still complete the handshake on its
+            # Bluetooth board while the controller and battery stay silent. Every
+            # read would then wait out its timeout, ~45 of them overrun the poll,
+            # and the poll is counted as failed. One short controller read first
+            # tells the two apart on any model: if it goes unanswered, keep the
+            # last values and stop here.
+            self._switched_off = not await client.controller_answers()
+            if self._switched_off:
+                _LOGGER.debug(
+                    "%s: controller did not answer, so the scooter is switched "
+                    "off; keeping the last values", self.address
+                )
+                return dict(self.data or {})
+
             # Device metadata: read once and cache.
             if self.serial is None:
                 try:

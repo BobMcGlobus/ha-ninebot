@@ -335,6 +335,14 @@ class NinebotClient:
         self.crypto.set_ble_data(received_key)
         return await self._session_works()
 
+    async def controller_answers(self) -> bool:
+        """Whether the controller answers a short read.
+
+        A vehicle that is switched off keeps only its Bluetooth board awake, so
+        the handshake can succeed while the controller and battery stay silent.
+        """
+        return await self._session_works()
+
     async def _session_works(self) -> bool:
         """Cheap probe read to verify the encrypted session is understood."""
         try:
