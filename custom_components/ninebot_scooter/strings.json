@@ -32,7 +32,7 @@
         "data_description": {
           "poll_interval": "How often to connect and read the scooter while it is awake. Lower is more responsive but uses more Bluetooth airtime and battery.",
           "parked_poll_interval": "How often to read the scooter while it is parked but still in Bluetooth range. 0 turns this off. A sleeping scooter wakes up for each read, and some models chime when they do. Whether a read keeps an older model from switching itself off is not yet known.",
-          "v2_password": "Only needed for newer models that are already linked to the official Segway-Ninebot app and therefore refuse a new pairing. 32 hex characters. Leave empty otherwise.",
+          "v2_password": "Only needed for scooters that are already linked to the official Segway-Ninebot app and therefore refuse a new pairing: newer models such as the Max G3, and classic ones such as the Max G2. The app's <SERIAL>_decrypt value, 32 hex characters. Leave empty otherwise.",
           "poll_timeout": "How long a single reading may take before it is given up. A reading that started while the scooter was riding past would otherwise block the next one. It also bounds the first-time pairing window, which gets this value minus 25 s - so raise it if you need longer to press the power button."
         }
       }

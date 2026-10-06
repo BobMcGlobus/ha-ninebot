@@ -453,7 +453,10 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Run ``action`` inside a fresh, authenticated legacy BLE session."""
         async with self._lock:
             ble_device = self._ble_device()
-            client = NinebotClient(app_key=self._app_key)
+            app_key = self._segway_app_key()
+            client = NinebotClient(
+                app_key=app_key or self._app_key, bound_to_app=app_key is not None
+            )
             try:
                 await client.connect(
                     ble_device,
@@ -478,6 +481,27 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 if client.gatt_services:
                     self.gatt_services = client.gatt_services
                 await client.disconnect()
+
+    def _segway_app_key(self) -> bytes | None:
+        """The Segway app's key for a classic vehicle, if the owner gave one.
+
+        It is the same ``<SERIAL>_decrypt`` value the newer protocol uses as its
+        pairing password, so it lives in the same field. On the classic protocol
+        it is the app key the vehicle was bound with, and having it means
+        authenticating as the app does instead of pairing by button. Without it,
+        nothing changes.
+
+        Read from the entry on every connection rather than once at setup:
+        changing only the password does not reload the entry.
+        """
+        stored = self.config_entry.data.get(CONF_V2_PASSWORD) if self.config_entry else None
+        if not stored:
+            return None
+        try:
+            key = bytes.fromhex(stored)
+        except ValueError:
+            return None
+        return key if len(key) == 16 else None
 
     def _ble_device(self):
         ble_device = bluetooth.async_ble_device_from_address(

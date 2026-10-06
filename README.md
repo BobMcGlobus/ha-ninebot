@@ -121,7 +121,8 @@ is read back and an error is raised if the scooter did not accept it.
 | **Segway E110SE** | Encryption2 | ⚠️ Handshake completes with a recovered pairing password, then authentication goes unanswered — [#7](https://github.com/BobMcGlobus/ha-ninebot/issues/7) |
 | **Ninebot F3** | Encryption2 | ✅ Confirmed working — vehicle data plus a battery board: pack voltage, current, capacity, cell voltages, temperatures |
 | **Max G3 / G3 Plus** | Encryption2 | ✅ Confirmed working on **two** scooters — vehicle data plus the battery board: pack voltage, current, cell voltages, capacities, charger state, ride mode. Sensors only, no controls. Needs the app's pairing password if already paired ([see below](#newer-models-and-the-account-lock)) |
-| G2, F2, F65, E-series | Encryption2 | Untested — reports welcome |
+| **Max G2** | legacy | ✅ Confirmed working on one scooter bound to the Segway app — sensors, authenticating with the app's key as the **Pairing password** ([see below](#getting-in-anyway-reuse-the-apps-password)), alongside the app. Ride mode and the lock are not mapped for this model yet |
+| F2, F65, E-series | Encryption2 | Untested — reports welcome |
 
 **Works on every model, whatever the protocol:** presence (**In range**),
 **Signal strength** and **Last seen**. These come from the Bluetooth
@@ -248,6 +249,12 @@ The integration has a **Pairing password** option (under *Configure*). Given the
 password the app itself uses, it skips pairing entirely and authenticates
 directly. Two ways to obtain it, both requiring access to your own devices:
 
+> **Classic-protocol scooters bound to the app** (a Max G2, for one) take the same
+> `<SERIAL>_decrypt` value. On those it is the app key the scooter was bound with,
+> and given it the integration authenticates the way the app does: no button
+> press, no re-binding, and the app keeps working (just not at the same moment).
+> With the field empty, a classic scooter pairs by button exactly as before.
+
 **From the app's local data** — the app keeps its own copy, keyed by serial:
 
 ```bash
@@ -369,6 +376,9 @@ stored, so this is a one-time step; no cloud login is involved.
 >   versa.
 > - On **newer models already paired with the app**, the button press cannot work
 >   at all — see [the account lock](#newer-models-and-the-account-lock).
+> - A **classic scooter already bound to the app** needs no button press either:
+>   enter the app's key as the pairing password
+>   ([how](#getting-in-anyway-reuse-the-apps-password)), and both keep working.
 
 ## Credits
 

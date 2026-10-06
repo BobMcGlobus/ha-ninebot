@@ -126,11 +126,17 @@ class Packet:
 
 
 class NinebotClient:
-    def __init__(self, app_key: bytes | None = None) -> None:
+    def __init__(self, app_key: bytes | None = None, *, bound_to_app: bool = False) -> None:
         # The app key is registered on the scooter during pairing. Reuse a
         # persisted key across sessions so pairing (a power-button press) is only
         # needed once; fall back to a random key if none is supplied.
         self.app_key = app_key if app_key is not None else secrets.token_bytes(16)
+        # A vehicle already bound to the Segway app holds the app's key, so with
+        # that key we can talk exactly as the app does: as the phone, no PING,
+        # and the session key derived straight after INIT. Taken from an iOS
+        # Bluetooth capture of the app connecting to a Max G2 (#13).
+        self.bound_to_app = bound_to_app
+        self.source = DeviceId.PHONE if bound_to_app else DeviceId.PC
         self.crypto = NbCrypto()
         self.receive_queue: asyncio.Queue[Packet] = asyncio.Queue(100)
         self.receive_buffer = bytearray()
@@ -180,7 +186,7 @@ class NinebotClient:
 
         # Init
         try:
-            resp = await self.request(Packet(DeviceId.PC, DeviceId.ES_BLE, Command.INIT, 0))
+            resp = await self.request(Packet(self.source, DeviceId.ES_BLE, Command.INIT, 0))
         except TimeoutError:
             # Silence on the very first packet, on a model that also offers the
             # newer Ninebot service, means we are talking the wrong protocol
@@ -202,8 +208,12 @@ class NinebotClient:
         _LOGGER.debug("> Serial: %s", bytes(received_serial).decode())
         self.crypto.set_ble_data(received_key)
 
+        if self.bound_to_app:
+            await self._pair_as_app(received_serial)
+            return
+
         # Ping
-        resp = await self.request(Packet(DeviceId.PC, DeviceId.ES_BLE, Command.PING, 0, self.app_key))
+        resp = await self.request(Packet(self.source, DeviceId.ES_BLE, Command.PING, 0, self.app_key))
         if resp.data_index == 0:
             # Zero (0) indicates we are not paired yet. Loop for a bounded time
             # waiting for the user to confirm pairing with the power button.
@@ -212,7 +222,7 @@ class NinebotClient:
             while time.time() < deadline:
                 await asyncio.sleep(1.0)
                 # Sending pair request here seem to pair the device. Unclear why.
-                await self.send(Packet(DeviceId.PC, DeviceId.ES_BLE, Command.PAIR, 0, received_serial))
+                await self.send(Packet(self.source, DeviceId.ES_BLE, Command.PAIR, 0, received_serial))
                 try:
                     resp = await self.receive()
                 except TimeoutError:
@@ -257,7 +267,7 @@ class NinebotClient:
         # encrypted session is already established for reads.
         try:
             await self.request(
-                Packet(DeviceId.PC, DeviceId.ES_BLE, Command.PAIR, 0, received_serial),
+                Packet(self.source, DeviceId.ES_BLE, Command.PAIR, 0, received_serial),
                 timeout=3,
             )
         except TimeoutError:
@@ -277,6 +287,36 @@ class NinebotClient:
             )
 
         _LOGGER.debug("Connected and authenticated successfully!")
+
+    async def _pair_as_app(self, received_serial: list[int]) -> None:
+        """Authenticate the way the Segway app does, with the app's own key.
+
+        The app never sends PING: the vehicle has held its key since the app
+        bound it, so the key never goes over the air. The session key becomes
+        SHA1(app key, BLE key) straight after INIT, and PAIR(serial) is the first
+        frame under it, sent with the counter at 2 as the app's is. Replaying
+        this against the capture gives the app's INIT and PAIR frames byte for
+        byte. The vehicle answers PAIR with index 1; anything else means it does
+        not hold this key.
+        """
+        self.crypto.set_app_data(self.app_key)
+        # encrypt() steps the counter before use; from 1 the PAIR goes out as 2.
+        self.crypto.it = max(self.crypto.it, 1)
+        rejected = (
+            "The scooter did not accept the pairing password as the Segway app's "
+            "key. Check it is the <SERIAL>_decrypt value for this scooter's serial"
+        )
+        try:
+            resp = await self.request(
+                Packet(self.source, DeviceId.ES_BLE, Command.PAIR, 0, received_serial)
+            )
+        except TimeoutError:
+            # A wrong key fails silently: the vehicle cannot authenticate the
+            # frame, so it never answers.
+            raise TimeoutError(rejected) from None
+        if resp.data_index != 1:
+            raise TimeoutError(f"{rejected} (PAIR answered {resp.data_index})")
+        _LOGGER.debug("Authenticated with the Segway app's key")
 
     async def _any_session_key_works(self, received_key: bytes) -> bool:
         """Try each key derivation in turn, returning True on the first that reads.
@@ -299,7 +339,7 @@ class NinebotClient:
         """Cheap probe read to verify the encrypted session is understood."""
         try:
             await self.request(
-                Packet(DeviceId.PC, DeviceId.ES_CONTROL, Command.READ, 0x1A, [2]),
+                Packet(self.source, DeviceId.ES_CONTROL, Command.READ, 0x1A, [2]),
                 timeout=3,
             )
         except TimeoutError:
@@ -381,7 +421,7 @@ class NinebotClient:
         data: list[int] = []
         for i in range(reg.index_len):
             resp = await self.request(
-                Packet(DeviceId.PC, target, Command.READ, reg.index_start + i, [reg.read_len])
+                Packet(self.source, target, Command.READ, reg.index_start + i, [reg.read_len])
             )
             data.extend(resp.data_segment)
         return data
@@ -400,7 +440,7 @@ class NinebotClient:
                 f"0x{board:02X} is not a board this protocol addresses. Known: {known}"
             ) from None
         resp = await self.request(
-            Packet(DeviceId.PC, target, Command.READ, index, [length])
+            Packet(self.source, target, Command.READ, index, [length])
         )
         return list(resp.data_segment[:length])
 
@@ -437,7 +477,7 @@ class NinebotClient:
         reg = get_register_desc(index)
         payload = [value & 0xFF, (value >> 8) & 0xFF]
         _LOGGER.debug("Writing register %s (0x%02X) = %d", index, reg.index_start, value)
-        await self.send(Packet(DeviceId.PC, target, Command.WRITE_ACK_NO_REPLY, reg.index_start, payload))
+        await self.send(Packet(self.source, target, Command.WRITE_ACK_NO_REPLY, reg.index_start, payload))
 
     async def _read_callback(self, _: BleakGATTCharacteristic, data: bytearray) -> None:
         if list(data[:2]) == Packet.MAGIC:
