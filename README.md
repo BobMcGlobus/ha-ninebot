@@ -65,6 +65,17 @@ is confirmed, because a wrong value in a register whose meaning is uncertain is
 the one way to put a setting into a state the app cannot undo. They will be added
 as they are pinned down.
 
+> **Help wanted: the LightBar on the Max G3.** The Segway app only offers the
+> LightBar setting on some regional versions of the Max G3 (EU and US, as far as
+> we know). The scooter the capture above came from is not one of them, so there
+> is no record of how the app switches it, and as far as we know it cannot be
+> switched on the scooter itself. If your app shows the LightBar setting and you
+> can record an Android Bluetooth log (see
+> [Getting in anyway](#getting-in-anyway-reuse-the-apps-password)) while switching
+> it on and off a few times, please open an issue. **Do not attach the log
+> publicly:** it contains your scooter's pairing password. We will sort out a
+> private way to send it.
+
 Not every model pairs the same way. A G30D registers Home Assistant when you
 press its power button; an **F65I never acknowledges pairing at all**, and a short
 press on it just toggles the headlight. That turns out not to matter: the
