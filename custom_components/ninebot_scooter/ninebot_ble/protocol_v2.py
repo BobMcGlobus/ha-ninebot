@@ -1104,6 +1104,16 @@ class V2SelectControl:
     sensitive: bool = False
 
 
+def control_data_key(control: V2NumberControl | V2SelectControl) -> str:
+    """Where a control's current value lives in the coordinator's data.
+
+    Kept apart from the sensor keys: "Ride mode" and "Charge limit" are both a
+    sensor and a control, and sharing the key let the raw control value
+    overwrite the sensor's decoded one.
+    """
+    return f"ctl_{control.board}_{control.index:02X}"
+
+
 V2_NUMBER_CONTROLS: tuple[V2NumberControl, ...] = (
     V2NumberControl(
         key="Charge limit", board=BOARD_KIND_BMS, index=0x82,

@@ -22,7 +22,7 @@ from .const import DOMAIN, PROTOCOL_V2, MAX_SPEED_LIMIT, MIN_SPEED_LIMIT
 from .coordinator import NinebotCoordinator
 from .entity import NinebotEntity
 from .ninebot_ble import CtrlIdx
-from .ninebot_ble.protocol_v2 import V2_NUMBER_CONTROLS
+from .ninebot_ble.protocol_v2 import V2_NUMBER_CONTROLS, control_data_key
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -174,7 +174,7 @@ class NinebotV2Number(NinebotEntity, NumberEntity):
 
     @property
     def native_value(self) -> float | None:
-        return (self.coordinator.data or {}).get(self._control.key)
+        return (self.coordinator.data or {}).get(control_data_key(self._control))
 
     @property
     def available(self) -> bool:

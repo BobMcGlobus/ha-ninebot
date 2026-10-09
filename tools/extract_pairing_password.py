@@ -21,7 +21,6 @@ from __future__ import annotations
 import argparse
 import pathlib
 import struct
-import sys
 from dataclasses import dataclass
 
 # Load the crypto module straight from its file: importing it as part of the

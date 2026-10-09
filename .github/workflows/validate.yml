@@ -24,3 +24,12 @@ jobs:
         with:
           category: integration
           ignore: brands
+
+  names:
+    # hassfest and HACS never import the code, so a missing import only shows
+    # up as a NameError on the user's machine. v0.18.0 shipped one.
+    name: Undefined names
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: pipx run ruff check --select F821,F822,F823 custom_components tools

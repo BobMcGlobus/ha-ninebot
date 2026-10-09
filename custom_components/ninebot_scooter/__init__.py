@@ -79,7 +79,7 @@ def _async_drop_stale_entities(
     removed = 0
     for reg_entry in er.async_entries_for_config_entry(registry, entry.entry_id):
         unique_id = reg_entry.unique_id
-        if unique_id in keep or unique_id.startswith(f"{address}_v2_"):
+        if unique_id in keep or unique_id.startswith((f"{address}_v2_", f"{address}_v2ctl_")):
             continue
         registry.async_remove(reg_entry.entity_id)
         removed += 1

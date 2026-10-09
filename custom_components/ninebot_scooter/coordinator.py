@@ -52,12 +52,16 @@ from .const import (
 from .ninebot_ble import BmsIdx, CtrlIdx, NinebotClient, iter_register
 from .ninebot_ble.protocol_v2 import (
     BOARD_DIS,
+    BOARD_KIND_BMS,
     BOARD_VCU,
     SERVICE_UUID as V2_SERVICE_UUID,
     V2_BMS_BOARDS,
     V2_BMS_REGISTERS,
+    V2_NUMBER_CONTROLS,
+    V2_SELECT_CONTROLS,
     NinebotV2Client,
     V2Register,
+    control_data_key,
     registers_for_board,
 )
 from .ninebot_ble.serial_parser import SerialParser
@@ -919,7 +923,7 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 _LOGGER.debug("Control %s did not read: %s", control.key, err)
                 continue
             if len(raw) >= 2:
-                data[control.key] = int.from_bytes(raw[:2], "little")
+                data[control_data_key(control)] = int.from_bytes(raw[:2], "little")
 
         if not data:
             raise UpdateFailed(

@@ -15,7 +15,7 @@ from .coordinator import NinebotCoordinator
 from .entity import NinebotEntity
 from .ninebot_ble import CtrlIdx
 from .ninebot_ble.register import KersLevel, OperationMode
-from .ninebot_ble.protocol_v2 import V2_SELECT_CONTROLS
+from .ninebot_ble.protocol_v2 import V2_SELECT_CONTROLS, control_data_key
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -121,7 +121,7 @@ class NinebotV2Select(NinebotEntity, SelectEntity):
 
     @property
     def current_option(self) -> str | None:
-        value = (self.coordinator.data or {}).get(self._control.key)
+        value = (self.coordinator.data or {}).get(control_data_key(self._control))
         return self._from_value.get(value)
 
     @property
