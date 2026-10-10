@@ -51,11 +51,19 @@ showed exactly how it writes each one, so these are reproduced byte for byte —
 the integration sends the same command the app does, and reads the value back to
 confirm it took:
 
-- **Ride mode** (select): Eco / Drive / Sport
+- **Energy recovery** (select): Off / Low / Standard
 - **Start speed** (select): 3 / 4 / 5 km/h
 - **Charge limit** (number): 80–100 %
 - **Auto power-off** (number): 1–30 min
 - **Sound volume** (number): 5–100 %
+
+Auto power-off, charge limit, sound volume and start speed are confirmed on a
+Max G3. Energy recovery shipped in v0.18.0 and v0.18.1 as "Ride mode" by mistake:
+on a Max G3 it changes the energy recovery level, not the mode on the dashboard.
+Switching the ride mode itself is not supported yet: no capture so far shows
+the app doing it. On an F3 the same register was read as the ride mode, so if you own
+one, please say in an issue whether it follows the app's energy recovery setting
+or the mode button.
 
 Only settings whose register, range and effect are unambiguous are exposed.
 Several more that the app writes — the on/off switches for traction control,
@@ -145,7 +153,7 @@ is read back and an error is raised if the scooter did not accept it.
 | **Ninebot F65I** | legacy | ✅ Confirmed working — sensors + controls. Never acknowledges pairing and has no button confirmation; the integration reads it without one |
 | **Segway E110SE** | Encryption2 | ⚠️ Handshake completes with a recovered pairing password, then authentication goes unanswered — [#7](https://github.com/BobMcGlobus/ha-ninebot/issues/7) |
 | **Ninebot F3** | Encryption2 | ✅ Confirmed working — vehicle data plus a battery board: pack voltage, current, capacity, cell voltages, temperatures |
-| **Max G3 / G3 Plus** | Encryption2 | ✅ Confirmed working on **two** scooters — vehicle data plus the battery board: pack voltage, current, cell voltages, capacities, charger state, ride mode. Sensors only, no controls. Needs the app's pairing password if already paired ([see below](#newer-models-and-the-account-lock)) |
+| **Max G3 / G3 Plus** | Encryption2 | ✅ Confirmed working on **two** scooters — vehicle data plus the battery board: pack voltage, current, cell voltages, capacities, charger state, energy recovery. Controls on one of them ([see above](#controls-on-the-newer-protocol-max-g3-and-relatives)). Needs the app's pairing password if already paired ([see below](#newer-models-and-the-account-lock)) |
 | **Max G2** | legacy | ✅ Confirmed working on one scooter bound to the Segway app — sensors, authenticating with the app's key as the **Pairing password** ([see below](#getting-in-anyway-reuse-the-apps-password)), alongside the app. Ride mode and the lock are not mapped for this model yet |
 | F2, F65, E-series | Encryption2 | Untested — reports welcome |
 

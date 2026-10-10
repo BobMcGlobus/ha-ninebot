@@ -74,12 +74,22 @@ def _async_drop_stale_entities(
     # These four are built by sensor.py and binary_sensor.py regardless of
     # protocol. Add to this set when adding an entity that is not a register.
     keep = {f"{address}_{suffix}" for suffix in ("in_range", "rssi", "last_seen", "last_updated")}
+    # 0x70 went out in v0.18 as "Ride mode" and is the energy recovery level.
+    # The sensor's unique id carries the name, so the old one is removed. The
+    # control's does not, so it is re-created once to lose the old entity id.
+    retired = {f"{address}_v2_Ride mode"}
 
     registry = er.async_get(hass)
     removed = 0
     for reg_entry in er.async_entries_for_config_entry(registry, entry.entry_id):
         unique_id = reg_entry.unique_id
-        if unique_id in keep or unique_id.startswith((f"{address}_v2_", f"{address}_v2ctl_")):
+        renamed = unique_id == f"{address}_v2ctl_70" and reg_entry.entity_id.endswith(
+            "_ride_mode"
+        )
+        if unique_id not in retired and not renamed and (
+            unique_id in keep
+            or unique_id.startswith((f"{address}_v2_", f"{address}_v2ctl_"))
+        ):
             continue
         registry.async_remove(reg_entry.entity_id)
         removed += 1

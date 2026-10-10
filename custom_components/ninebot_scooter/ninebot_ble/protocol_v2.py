@@ -682,12 +682,12 @@ def _bit(bit: int) -> Callable[[bytes], int]:
     return lambda data: (data[0] >> bit) & 1
 
 
-_RIDE_MODES: dict[int, str] = {0: "Eco", 1: "Drive", 2: "Sport"}
+_ENERGY_RECOVERY: dict[int, str] = {0: "Off", 1: "Low", 2: "Standard"}
 
 
-def _ride_mode(data: bytes) -> str | int:
-    """Name the ride mode, passing an unknown value through as the raw number."""
-    return _RIDE_MODES.get(data[0], data[0])
+def _energy_recovery(data: bytes) -> str | int:
+    """Name the energy recovery level, passing an unknown value through as is."""
+    return _ENERGY_RECOVERY.get(data[0], data[0])
 
 
 def _u16_unless_saturated(data: bytes) -> int | None:
@@ -839,13 +839,17 @@ V2_VCU_REGISTERS: tuple[V2Register, ...] = (
         unit="s",
         device_class="duration",
     ),
-    # The E / D / S indicator on the dashboard. The app writes this register to
-    # change mode and the vehicle reads the new value straight back.
+    # Energy recovery: Off / Low / Standard in the app. Shipped as "Ride mode"
+    # until v0.18.1, from a reading on an F3 that matched the dashboard's
+    # E / D / S. On a Max G3 the app writes it from its energy recovery menu, in
+    # two captures, and writing it from Home Assistant left the dashboard mode
+    # where it was (#8). The labels follow the app's list top to bottom, which is
+    # the order the values were written in, and the G3 ended on 2 = Standard.
     V2Register(
-        key="Ride mode",
+        key="Energy recovery",
         index=0x70,
         length=2,
-        unpack=_ride_mode,
+        unpack=_energy_recovery,
         primary=True,
     ),
 )
@@ -1107,8 +1111,8 @@ class V2SelectControl:
 def control_data_key(control: V2NumberControl | V2SelectControl) -> str:
     """Where a control's current value lives in the coordinator's data.
 
-    Kept apart from the sensor keys: "Ride mode" and "Charge limit" are both a
-    sensor and a control, and sharing the key let the raw control value
+    Kept apart from the sensor keys: "Energy recovery" and "Charge limit" are
+    both a sensor and a control, and sharing the key let the raw control value
     overwrite the sensor's decoded one.
     """
     return f"ctl_{control.board}_{control.index:02X}"
@@ -1131,8 +1135,8 @@ V2_NUMBER_CONTROLS: tuple[V2NumberControl, ...] = (
 
 V2_SELECT_CONTROLS: tuple[V2SelectControl, ...] = (
     V2SelectControl(
-        key="Ride mode", board=BOARD_KIND_VCU, index=0x70,
-        options={"Eco": 0, "Drive": 1, "Sport": 2},
+        key="Energy recovery", board=BOARD_KIND_VCU, index=0x70,
+        options={"Off": 0, "Low": 1, "Standard": 2},
     ),
     V2SelectControl(
         key="Start speed", board=BOARD_KIND_VCU, index=0x42,
