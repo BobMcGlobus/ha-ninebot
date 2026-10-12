@@ -863,8 +863,8 @@ V2_VCU_REGISTERS: tuple[V2Register, ...] = (
     # until v0.18.1, from a reading on an F3 that matched the dashboard's
     # E / D / S. On a Max G3 the app writes it from its energy recovery menu, in
     # two captures, and writing it from Home Assistant left the dashboard mode
-    # where it was (#8). The labels follow the app's list top to bottom, which is
-    # the order the values were written in, and the G3 ended on 2 = Standard.
+    # where it was (#8). Off / Low / Standard match what the app shows after a
+    # change from Home Assistant, confirmed on that G3.
     V2Register(
         key="Energy recovery",
         index=0x70,
