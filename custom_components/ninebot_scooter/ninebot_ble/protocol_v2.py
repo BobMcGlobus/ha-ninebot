@@ -682,6 +682,14 @@ def _bit(bit: int) -> Callable[[bytes], int]:
     return lambda data: (data[0] >> bit) & 1
 
 
+_RIDE_MODES: dict[int, str] = {1: "Walk", 2: "Eco", 3: "Sport", 5: "Drive"}
+
+
+def _ride_mode(data: bytes) -> str | int:
+    """Name the ride mode, passing an unknown value through as the raw number."""
+    return _RIDE_MODES.get(data[0], data[0])
+
+
 _ENERGY_RECOVERY: dict[int, str] = {0: "Off", 1: "Low", 2: "Standard"}
 
 
@@ -772,6 +780,18 @@ V2_VCU_REGISTERS: tuple[V2Register, ...] = (
         scale=0.01,
         unit="km",
         device_class="distance",
+        primary=True,
+    ),
+    # The mode on the dashboard, switched with the button. Found on a Max G3 by
+    # reading every register in each of the four modes (#8): apart from the
+    # range estimates, only 0x5A followed. The numbers are what the scooter
+    # reports, not the dashboard's order. Read only - no capture shows the app
+    # writing it.
+    V2Register(
+        key="Ride mode",
+        index=0x5A,
+        length=2,
+        unpack=_ride_mode,
         primary=True,
     ),
     # Both counters below tick once per second while the vehicle is AWAKE, not
