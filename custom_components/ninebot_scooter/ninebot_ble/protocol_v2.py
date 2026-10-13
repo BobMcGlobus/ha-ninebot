@@ -1177,4 +1177,10 @@ V2_SELECT_CONTROLS: tuple[V2SelectControl, ...] = (
         key="Start speed", board=BOARD_KIND_VCU, index=0x42,
         options={"3 km/h": 3, "4 km/h": 4, "5 km/h": 5},
     ),
+    # What the leftmost handlebar button does. The values are not in the app's
+    # order; each was read back after choosing it in the app (#8).
+    V2SelectControl(
+        key="Custom button", board=BOARD_KIND_VCU, index=0x4A,
+        options={"Hazard lights": 6, "Energy recovery level": 4, "Boost": 7},
+    ),
 )

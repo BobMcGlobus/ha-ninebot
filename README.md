@@ -56,9 +56,11 @@ confirm it took:
 - **Charge limit** (number): 80–100 %
 - **Auto power-off** (number): 1–30 min
 - **Sound volume** (number): 5–100 %
+- **Custom button** (select): what the leftmost handlebar button does — hazard
+  lights / energy recovery level / Boost
 
-All five are confirmed on a Max G3, the energy recovery labels included, by
-checking what the app shows after each change. Energy recovery shipped in v0.18.0 and v0.18.1 as "Ride mode" by mistake:
+All six are confirmed on a Max G3, the labels included, by checking what the
+app shows after each change. Energy recovery shipped in v0.18.0 and v0.18.1 as "Ride mode" by mistake:
 on a Max G3 it changes the energy recovery level, not the mode on the dashboard.
 Switching the ride mode is not supported: no capture so far shows the app doing
 it. The current mode (Walk / Eco / Drive / Sport) is shown as a sensor. On an F3 the same register was read as the ride mode, so if you own

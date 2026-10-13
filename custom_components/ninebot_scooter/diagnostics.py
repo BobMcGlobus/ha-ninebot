@@ -17,6 +17,17 @@ from .const import CONF_APP_KEY, DOMAIN
 from .coordinator import NinebotCoordinator
 
 
+
+def _prefix(name: str | None) -> str | None:
+    """The first four characters of a name that is usually the serial.
+
+    Enough to tell the series apart, which is what support needs. Both the
+    entry title and the advertised name default to the full serial.
+    """
+    if not name:
+        return name
+    return f"{name[:4]}... ({len(name)} characters)"
+
 async def async_get_config_entry_diagnostics(
     hass: HomeAssistant, entry: ConfigEntry
 ) -> dict[str, Any]:
@@ -26,10 +37,12 @@ async def async_get_config_entry_diagnostics(
 
     diag: dict[str, Any] = {
         "entry": {
-            "title": entry.title,
+            "title": _prefix(entry.title),
             "version": entry.version,
             # The pairing key is a secret and the MAC identifies the device.
             "data_keys": sorted(k for k in entry.data if k != CONF_APP_KEY),
+            # Left out of data_keys, which made a stored key look missing (#16).
+            "pairing_key_stored": bool(entry.data.get(CONF_APP_KEY)),
             "options": dict(entry.options),
         },
         "device": {
@@ -83,7 +96,7 @@ async def async_get_config_entry_diagnostics(
         diag["bluetooth"] = {
             "seen": True,
             "seen_connectable": connectable_seen,
-            "name": service_info.name,
+            "name": _prefix(service_info.name),
             "rssi": service_info.rssi,
             "connectable": service_info.connectable,
             "source": service_info.source,
