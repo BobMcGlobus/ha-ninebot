@@ -76,7 +76,7 @@ as they are pinned down.
 > **Help wanted: the LightBar and under-deck lights on the Max G3.** According
 > to Segway's app, the LightBar (the daytime running light on the handlebar) is
 > not supported on German and Italian versions of the Max G3, and the white /
-> yellow under-deck lights only on versions sold outside the EU. The scooter the
+> yellow under-deck lights are only supported outside the EU. The scooter the
 > capture above came from is a German one, so there is no record of how the app
 > switches either, and as far as we know they cannot be switched on the scooter
 > itself. If your app shows one of these settings and you can record an Android
