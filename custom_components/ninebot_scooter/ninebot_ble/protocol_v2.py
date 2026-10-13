@@ -741,6 +741,9 @@ class V2Register:
     unit: str | None = None
     device_class: str | None = None
     primary: bool = False
+    # A yes/no flag, shown as a binary sensor; device_class is then a binary
+    # sensor class ("plug", "battery_charging").
+    binary: bool = False
 
 
 # Kick scooters (Max G3 and relatives). Every entry here was confirmed by
@@ -838,14 +841,18 @@ V2_VCU_REGISTERS: tuple[V2Register, ...] = (
         index=0x1F,
         length=2,
         unpack=_bit(6),
+        device_class="plug",
         primary=True,
+        binary=True,
     ),
     V2Register(
         key="Charging",
         index=0x1C,
         length=2,
         unpack=_bit(2),
+        device_class="battery_charging",
         primary=True,
+        binary=True,
     ),
     # Not a current, though a 2276 looks like one: it climbed while the pack sat
     # at 100 %, and its steps follow the wall clock rather than the charge
@@ -1085,6 +1092,14 @@ _REGISTERS_BY_BOARD: dict[int, tuple[V2Register, ...]] = {
 def registers_for_board(board: int) -> tuple[V2Register, ...]:
     """Return the register table belonging to a board, VCU being the default."""
     return _REGISTERS_BY_BOARD.get(board, V2_VCU_REGISTERS)
+
+
+def binary_registers(board: int, bms_board: int | None = None) -> list[V2Register]:
+    """The yes/no registers for a vehicle, which become binary sensors."""
+    registers = registers_for_board(board)
+    if bms_board is not None:
+        registers = (*registers, *V2_BMS_REGISTERS)
+    return [reg for reg in registers if reg.binary]
 
 
 # --- Controls (newer protocol) ----------------------------------------------

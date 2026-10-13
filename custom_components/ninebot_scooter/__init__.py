@@ -10,6 +10,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 
 from .const import CONF_APP_KEY, DOMAIN, PLATFORMS, PROTOCOL_V2
+from .ninebot_ble.protocol_v2 import BOARD_VCU, binary_registers
 from .services import async_setup_services
 from .coordinator import NinebotCoordinator
 
@@ -74,6 +75,14 @@ def _async_drop_stale_entities(
     # These four are built by sensor.py and binary_sensor.py regardless of
     # protocol. Add to this set when adding an entity that is not a register.
     keep = {f"{address}_{suffix}" for suffix in ("in_range", "rssi", "last_seen", "last_updated")}
+    # Yes/no registers moved from sensor to binary_sensor in v0.18.4 under the
+    # same unique id; the sensor entry is what is left over.
+    now_binary = {
+        f"{address}_v2_{reg.key}"
+        for reg in binary_registers(
+            coordinator.v2_board or BOARD_VCU, coordinator.v2_bms_board
+        )
+    }
 
     registry = er.async_get(hass)
     removed = 0
@@ -86,7 +95,8 @@ def _async_drop_stale_entities(
         renamed = unique_id == f"{address}_v2ctl_70" and reg_entry.entity_id.endswith(
             "_ride_mode"
         )
-        if not renamed and (
+        moved = reg_entry.domain == "sensor" and unique_id in now_binary
+        if not renamed and not moved and (
             unique_id in keep
             or unique_id.startswith((f"{address}_v2_", f"{address}_v2ctl_"))
         ):

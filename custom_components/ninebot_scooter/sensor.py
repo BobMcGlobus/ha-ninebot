@@ -133,6 +133,8 @@ def _build_v2_descriptions(
         registers = (*registers, *V2_BMS_REGISTERS)
     descriptions: list[NinebotSensorEntityDescription] = []
     for reg in registers:
+        if reg.binary:
+            continue  # binary_sensor.py
         descriptions.append(
             NinebotSensorEntityDescription(
                 # Namespaced: several register names exist in both tables, and a
