@@ -73,12 +73,14 @@ is confirmed, because a wrong value in a register whose meaning is uncertain is
 the one way to put a setting into a state the app cannot undo. They will be added
 as they are pinned down.
 
-> **Help wanted: the LightBar on the Max G3.** The Segway app only offers the
-> LightBar setting on some regional versions of the Max G3 (EU and US, as far as
-> we know). The scooter the capture above came from is not one of them, so there
-> is no record of how the app switches it, and as far as we know it cannot be
-> switched on the scooter itself. If your app shows the LightBar setting and you
-> can record an Android Bluetooth log (see
+> **Help wanted: the LightBar and under-deck lights on the Max G3.** According
+> to Segway's app, the LightBar (the daytime running light on the handlebar) is
+> not supported on German and Italian versions of the Max G3, and the white /
+> yellow under-deck lights only on versions sold outside the EU. The scooter the
+> capture above came from is a German one, so there is no record of how the app
+> switches either, and as far as we know they cannot be switched on the scooter
+> itself. If your app shows one of these settings and you can record an Android
+> Bluetooth log (see
 > [Getting in anyway](#getting-in-anyway-reuse-the-apps-password)) while switching
 > it on and off a few times, please open an issue. **Do not attach the log
 > publicly:** it contains your scooter's pairing password. We will sort out a
