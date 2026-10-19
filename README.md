@@ -32,6 +32,10 @@ Sensors, polled while the scooter is awake and in range:
   operating mode (Normal/Eco/Sport), KERS level, cruise control, tail light,
   configured speed limits
 
+Entity names and their states are translated into German; anything else shows
+in English. More languages are a translation file each
+(`custom_components/ninebot_scooter/translations/`).
+
 ### Controls
 
 Writing has been confirmed on a G30D (the scooter acknowledges the write and

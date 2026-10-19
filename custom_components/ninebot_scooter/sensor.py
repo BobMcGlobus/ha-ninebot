@@ -19,7 +19,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN, PROTOCOL_V2
 from .coordinator import NinebotCoordinator
-from .entity import NinebotEntity
+from .entity import NinebotEntity, translation_key_for
 from .ninebot_ble import BmsIdx, CtrlIdx, get_register_desc, iter_register
 from .ninebot_ble.protocol_v2 import BOARD_VCU, V2_BMS_REGISTERS, registers_for_board
 
@@ -101,7 +101,7 @@ def _build_descriptions() -> list[NinebotSensorEntityDescription]:
             NinebotSensorEntityDescription(
                 key=key,
                 reg_key=key,
-                name=key,  # register enum value is a human-readable label
+                translation_key=idx.name.lower(),
                 device_class=device_class,
                 native_unit_of_measurement=unit,
                 state_class=state_class,
@@ -143,10 +143,15 @@ def _build_v2_descriptions(
                 # entity then inherits "disabled" and silently never appears.
                 key=f"v2_{reg.key}",
                 reg_key=reg.key,
-                name=reg.key,
+                translation_key=translation_key_for(reg.key),
                 device_class=(
-                    SensorDeviceClass(reg.device_class) if reg.device_class else None
+                    SensorDeviceClass.ENUM
+                    if reg.options
+                    else SensorDeviceClass(reg.device_class)
+                    if reg.device_class
+                    else None
                 ),
+                options=list(reg.options) if reg.options else None,
                 native_unit_of_measurement=reg.unit,
                 state_class=(
                     SensorStateClass.TOTAL_INCREASING
@@ -220,7 +225,14 @@ class NinebotSensor(NinebotEntity, RestoreSensor):
     def native_value(self) -> str | int | float | None:
         """Return the current register value, or the last known one."""
         current = (self.coordinator.data or {}).get(self.entity_description.reg_key)
-        return current if current is not None else self._restored_value
+        value = current if current is not None else self._restored_value
+        # A named-state sensor only takes its listed states. Anything else is a
+        # value nobody has mapped yet, or a state restored from before the
+        # names became translation keys.
+        options = self.entity_description.options
+        if options is not None and value not in options:
+            return None
+        return value
 
     @property
     def available(self) -> bool:
@@ -231,7 +243,7 @@ class NinebotSensor(NinebotEntity, RestoreSensor):
 class NinebotLastUpdateSensor(NinebotEntity, RestoreSensor):
     """Timestamp of the last successful poll (i.e. how fresh the values are)."""
 
-    _attr_name = "Last updated"
+    _attr_translation_key = "last_updated"
     _attr_device_class = SensorDeviceClass.TIMESTAMP
     _attr_entity_category = EntityCategory.DIAGNOSTIC
 
@@ -264,7 +276,7 @@ class NinebotLastUpdateSensor(NinebotEntity, RestoreSensor):
 class NinebotSignalSensor(NinebotEntity, SensorEntity):
     """Bluetooth signal strength of the scooter's advertisement."""
 
-    _attr_name = "Signal strength"
+    _attr_translation_key = "signal_strength"
     _attr_device_class = SensorDeviceClass.SIGNAL_STRENGTH
     _attr_native_unit_of_measurement = "dBm"
     _attr_state_class = SensorStateClass.MEASUREMENT
@@ -287,7 +299,7 @@ class NinebotSignalSensor(NinebotEntity, SensorEntity):
 class NinebotLastSeenSensor(NinebotEntity, RestoreSensor):
     """When the scooter's advertisement was last heard."""
 
-    _attr_name = "Last seen"
+    _attr_translation_key = "last_seen"
     _attr_device_class = SensorDeviceClass.TIMESTAMP
     _attr_entity_category = EntityCategory.DIAGNOSTIC
 
@@ -323,7 +335,7 @@ class NinebotPowerSensor(NinebotEntity, SensorEntity):
     negative while charging, which the register never did.
     """
 
-    _attr_name = "Power"
+    _attr_translation_key = "power"
     _attr_device_class = SensorDeviceClass.POWER
     _attr_native_unit_of_measurement = "W"
     _attr_state_class = SensorStateClass.MEASUREMENT

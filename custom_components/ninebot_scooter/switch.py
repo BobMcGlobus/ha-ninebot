@@ -29,14 +29,14 @@ class NinebotSwitchEntityDescription(SwitchEntityDescription):
 SWITCHES: tuple[NinebotSwitchEntityDescription, ...] = (
     NinebotSwitchEntityDescription(
         key="cruise_control",
-        name="Cruise control",
+        translation_key="cruise_control",
         icon="mdi:cruise-control",
         register=CtrlIdx.NB_CTL_CRUISE,
         entity_category=EntityCategory.CONFIG,
     ),
     NinebotSwitchEntityDescription(
         key="tail_light",
-        name="Tail light",
+        translation_key="tail_light",
         icon="mdi:car-light-high",
         register=CtrlIdx.NB_CTL_TAIL_LIGHT,
         entity_category=EntityCategory.CONFIG,

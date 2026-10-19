@@ -90,5 +90,302 @@
         }
       }
     }
+  },
+  "entity": {
+    "binary_sensor": {
+      "charger_connected": {
+        "name": "Ladegerät angeschlossen"
+      },
+      "charging": {
+        "name": "Lädt"
+      },
+      "in_range": {
+        "name": "In Reichweite"
+      }
+    },
+    "number": {
+      "auto_power_off": {
+        "name": "Automatische Abschaltung"
+      },
+      "charge_limit": {
+        "name": "Ladelimit"
+      },
+      "normal_mode_speed_limit": {
+        "name": "Höchstgeschwindigkeit Normalmodus"
+      },
+      "sound_volume": {
+        "name": "Lautstärke"
+      },
+      "speed_limit_release": {
+        "name": "Geschwindigkeitsfreigabe (experimentell)"
+      }
+    },
+    "select": {
+      "custom_button": {
+        "name": "Benutzerdefinierte Taste",
+        "state": {
+          "hazard_lights": "Warnblinker",
+          "energy_recovery_level": "Energierückgewinnungsstufe",
+          "boost": "Boost"
+        }
+      },
+      "energy_recovery": {
+        "name": "Energierückgewinnung",
+        "state": {
+          "off": "Aus",
+          "low": "Schwach",
+          "standard": "Standard"
+        }
+      },
+      "kers_level": {
+        "name": "Rekuperation (KERS)",
+        "state": {
+          "off": "Aus",
+          "medium": "Mittel",
+          "strong": "Stark"
+        }
+      },
+      "operating_mode": {
+        "name": "Fahrmodus",
+        "state": {
+          "normal": "Normal",
+          "eco": "Eco",
+          "sport": "Sport"
+        }
+      },
+      "start_speed": {
+        "name": "Startgeschwindigkeit",
+        "state": {
+          "3_kmh": "3 km/h",
+          "4_kmh": "4 km/h",
+          "5_kmh": "5 km/h"
+        }
+      }
+    },
+    "sensor": {
+      "average_speed": {
+        "name": "Durchschnittsgeschwindigkeit"
+      },
+      "awake_time": {
+        "name": "Wachzeit"
+      },
+      "bat_balance_statu": {
+        "name": "Zellausgleich aktiv"
+      },
+      "bat_capacity": {
+        "name": "Akku-Nennkapazität"
+      },
+      "bat_current_cur": {
+        "name": "Akkustrom"
+      },
+      "bat_healthy": {
+        "name": "Akkuzustand"
+      },
+      "bat_ochg_state": {
+        "name": "Zellüberspannung"
+      },
+      "bat_odis_state": {
+        "name": "Zellunterspannung"
+      },
+      "bat_overdischarge_times": {
+        "name": "Akku-Tiefentladungen"
+      },
+      "bat_overflow_times": {
+        "name": "Akku-Überladungen"
+      },
+      "bat_remaining_cap": {
+        "name": "Restkapazität Akku (mAh)"
+      },
+      "bat_remaining_cap_percent": {
+        "name": "Akkustand"
+      },
+      "bat_sn": {
+        "name": "Seriennummer BMS"
+      },
+      "bat_sw_ver": {
+        "name": "BMS-Firmware"
+      },
+      "bat_temp_cur1": {
+        "name": "Akkutemperatur 1"
+      },
+      "bat_temp_cur2": {
+        "name": "Akkutemperatur 2"
+      },
+      "bat_voltage_cur": {
+        "name": "Akkuspannung"
+      },
+      "battery": {
+        "name": "Akkustand"
+      },
+      "battery_current": {
+        "name": "Akkustrom"
+      },
+      "battery_health": {
+        "name": "Akkuzustand"
+      },
+      "battery_temperature": {
+        "name": "Akkutemperatur"
+      },
+      "battery_voltage": {
+        "name": "Akkuspannung"
+      },
+      "cell_voltage_max": {
+        "name": "Höchste Zellspannung"
+      },
+      "cell_voltage_min": {
+        "name": "Niedrigste Zellspannung"
+      },
+      "charge_limit": {
+        "name": "Ladelimit"
+      },
+      "current_speed": {
+        "name": "Aktuelle Geschwindigkeit"
+      },
+      "energy_recovery": {
+        "name": "Energierückgewinnung",
+        "state": {
+          "off": "Aus",
+          "low": "Schwach",
+          "standard": "Standard"
+        }
+      },
+      "full_capacity": {
+        "name": "Volle Kapazität"
+      },
+      "last_seen": {
+        "name": "Zuletzt gesehen"
+      },
+      "last_updated": {
+        "name": "Zuletzt aktualisiert"
+      },
+      "nb_ctl_limit_spd": {
+        "name": "Geschwindigkeitsbegrenzung oder Freigabe"
+      },
+      "nb_ctl_litspeed": {
+        "name": "Höchstgeschwindigkeit im begrenzten Modus"
+      },
+      "nb_ctl_nomalspeed": {
+        "name": "Höchstgeschwindigkeit im Normalmodus"
+      },
+      "nb_fw_ver": {
+        "name": "Controller-Firmware"
+      },
+      "nb_inf_actual_mil": {
+        "name": "Tatsächliche Restreichweite"
+      },
+      "nb_inf_alerm": {
+        "name": "Alarmcode"
+      },
+      "nb_inf_avrspeed": {
+        "name": "Durchschnittsgeschwindigkeit"
+      },
+      "nb_inf_body_temp": {
+        "name": "Scootertemperatur"
+      },
+      "nb_inf_bool_act": {
+        "name": "Scooter aktiviert"
+      },
+      "nb_inf_bool_bat2_in": {
+        "name": "Externer Akku eingesetzt"
+      },
+      "nb_inf_bool_beep": {
+        "name": "Summeralarm aktiv"
+      },
+      "nb_inf_bool_limitspeed": {
+        "name": "Geschwindigkeit begrenzt"
+      },
+      "nb_inf_bool_lock": {
+        "name": "Scooter gesperrt"
+      },
+      "nb_inf_btpassword": {
+        "name": "Bluetooth-Kopplungscode"
+      },
+      "nb_inf_drv_volt": {
+        "name": "Versorgungsspannung Controller"
+      },
+      "nb_inf_error": {
+        "name": "Fehlercode"
+      },
+      "nb_inf_prd_rid_mil": {
+        "name": "Geschätzte Restreichweite"
+      },
+      "nb_inf_rid_mil": {
+        "name": "Gesamtkilometer"
+      },
+      "nb_inf_rid_tim": {
+        "name": "Gesamtfahrzeit"
+      },
+      "nb_inf_run_tim": {
+        "name": "Gesamtbetriebszeit"
+      },
+      "nb_inf_sn": {
+        "name": "Seriennummer Scooter"
+      },
+      "nb_inf_ver_ble": {
+        "name": "BLE-Firmware"
+      },
+      "nb_inf_ver_bms2": {
+        "name": "Firmware externes BMS"
+      },
+      "nb_single_mil": {
+        "name": "Strecke dieser Fahrt"
+      },
+      "nb_single_run_tim": {
+        "name": "Betriebszeit dieser Fahrt"
+      },
+      "power": {
+        "name": "Leistung"
+      },
+      "rated_max_speed": {
+        "name": "Nenn-Höchstgeschwindigkeit"
+      },
+      "remaining_capacity": {
+        "name": "Restkapazität"
+      },
+      "remaining_range": {
+        "name": "Restreichweite"
+      },
+      "ride_mode": {
+        "name": "Fahrmodus",
+        "state": {
+          "walk": "Walk",
+          "eco": "Eco",
+          "drive": "Drive",
+          "sport": "Sport"
+        }
+      },
+      "riding_mode": {
+        "name": "Fahrmodus"
+      },
+      "riding_time": {
+        "name": "Fahrzeit"
+      },
+      "signal_strength": {
+        "name": "Signalstärke"
+      },
+      "state_of_charge": {
+        "name": "Ladezustand"
+      },
+      "temperature": {
+        "name": "Temperatur"
+      },
+      "time_since_charger_change": {
+        "name": "Zeit seit Ein- oder Ausstecken"
+      },
+      "total_mileage": {
+        "name": "Gesamtkilometer"
+      },
+      "trip_mileage": {
+        "name": "Strecke dieser Fahrt"
+      }
+    },
+    "switch": {
+      "cruise_control": {
+        "name": "Tempomat"
+      },
+      "tail_light": {
+        "name": "Rücklicht"
+      }
+    }
   }
 }

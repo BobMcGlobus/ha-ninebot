@@ -12,7 +12,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN, PROTOCOL_V2
 from .coordinator import NinebotCoordinator
-from .entity import NinebotEntity
+from .entity import NinebotEntity, translation_key_for
 from .ninebot_ble import CtrlIdx
 from .ninebot_ble.register import KersLevel, OperationMode
 from .ninebot_ble.protocol_v2 import V2_SELECT_CONTROLS, control_data_key
@@ -27,14 +27,16 @@ class NinebotSelectEntityDescription(SelectEntityDescription):
     to_value: dict[str, int]
 
 
-_MODE_MAP = {member.name: member.value for member in OperationMode}
-_KERS_MAP = {member.name: member.value for member in KersLevel}
+# Options are translation keys, so lowercase; the registers read as the enum
+# member name ("SPORT").
+_MODE_MAP = {member.name.lower(): member.value for member in OperationMode}
+_KERS_MAP = {member.name.lower(): member.value for member in KersLevel}
 
 
 SELECTS: tuple[NinebotSelectEntityDescription, ...] = (
     NinebotSelectEntityDescription(
         key="operating_mode",
-        name="Ride mode",
+        translation_key="operating_mode",
         icon="mdi:speedometer",
         register=CtrlIdx.NB_CTL_WORKMODE,
         options=list(_MODE_MAP),
@@ -43,7 +45,7 @@ SELECTS: tuple[NinebotSelectEntityDescription, ...] = (
     ),
     NinebotSelectEntityDescription(
         key="kers_level",
-        name="Recuperation (KERS)",
+        translation_key="kers_level",
         icon="mdi:battery-charging",
         register=CtrlIdx.NB_CTL_KERS,
         options=list(_KERS_MAP),
@@ -84,13 +86,12 @@ class NinebotSelect(NinebotEntity, SelectEntity):
     def current_option(self) -> str | None:
         """Return the current option.
 
-        The coordinator stores enum registers as their member name (e.g. "SPORT"),
-        which is exactly our option label.
+        The coordinator stores enum registers as their member name (e.g. "SPORT");
+        the option is the same name in lowercase.
         """
         value = (self.coordinator.data or {}).get(str(self.entity_description.register))
-        if value in self.entity_description.to_value:
-            return str(value)
-        return None
+        option = str(value).lower()
+        return option if option in self.entity_description.to_value else None
 
     async def async_select_option(self, option: str) -> None:
         """Change the option."""
@@ -99,7 +100,7 @@ class NinebotSelect(NinebotEntity, SelectEntity):
             self.entity_description.register, raw
         )
         # read_reg returns the enum member name for these registers.
-        if str(readback) != option:
+        if str(readback).lower() != option:
             raise HomeAssistantError(
                 f"Scooter did not accept '{option}' (it now reports {readback})"
             )
@@ -113,7 +114,7 @@ class NinebotV2Select(NinebotEntity, SelectEntity):
     def __init__(self, coordinator: NinebotCoordinator, control) -> None:
         super().__init__(coordinator)
         self._control = control
-        self._attr_name = control.key
+        self._attr_translation_key = translation_key_for(control.key)
         self._attr_options = list(control.options)
         self._attr_unique_id = f"{coordinator.address}_v2ctl_{control.index:02X}"
         self._attr_entity_registry_enabled_default = not control.sensitive

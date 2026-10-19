@@ -20,7 +20,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN, PROTOCOL_V2, MAX_SPEED_LIMIT, MIN_SPEED_LIMIT
 from .coordinator import NinebotCoordinator
-from .entity import NinebotEntity
+from .entity import NinebotEntity, translation_key_for
 from .ninebot_ble import CtrlIdx
 from .ninebot_ble.protocol_v2 import V2_NUMBER_CONTROLS, control_data_key
 
@@ -58,7 +58,7 @@ async def async_setup_entry(
 class NinebotMaxSpeedNumber(NinebotEntity, NumberEntity):
     """Normal-mode speed limit, writable."""
 
-    _attr_name = "Normal mode speed limit"
+    _attr_translation_key = "normal_mode_speed_limit"
     _attr_icon = "mdi:speedometer"
     _attr_native_unit_of_measurement = UnitOfSpeed.KILOMETERS_PER_HOUR
     _attr_native_min_value = MIN_SPEED_LIMIT
@@ -116,7 +116,7 @@ class NinebotSpeedReleaseNumber(NinebotEntity, NumberEntity):
     what the scooter actually does.
     """
 
-    _attr_name = "Speed limit release (experimental)"
+    _attr_translation_key = "speed_limit_release"
     _attr_icon = "mdi:speedometer-medium"
     _attr_native_unit_of_measurement = UnitOfSpeed.KILOMETERS_PER_HOUR
     _attr_native_min_value = 0
@@ -162,7 +162,7 @@ class NinebotV2Number(NinebotEntity, NumberEntity):
     def __init__(self, coordinator: NinebotCoordinator, control) -> None:
         super().__init__(coordinator)
         self._control = control
-        self._attr_name = control.key
+        self._attr_translation_key = translation_key_for(control.key)
         self._attr_native_min_value = control.minimum
         self._attr_native_max_value = control.maximum
         self._attr_native_step = control.step

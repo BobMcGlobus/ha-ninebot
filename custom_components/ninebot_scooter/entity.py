@@ -1,6 +1,8 @@
 """Base entity for the Ninebot Scooter integration."""
 from __future__ import annotations
 
+import re
+
 from homeassistant.helpers.device_registry import CONNECTION_BLUETOOTH, DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -38,3 +40,12 @@ class NinebotEntity(CoordinatorEntity[NinebotCoordinator]):
             sw_version=str(coordinator.sw_version) if coordinator.sw_version else None,
             serial_number=coordinator.serial,
         )
+
+
+def translation_key_for(label: str) -> str:
+    """The translation key for an entity named after a register label.
+
+    "Auto power-off" -> "auto_power_off". The names themselves live in
+    strings.json and translations/, so they can be translated.
+    """
+    return re.sub(r"[^a-z0-9]+", "_", label.lower()).strip("_")

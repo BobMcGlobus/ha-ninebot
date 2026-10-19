@@ -682,7 +682,7 @@ def _bit(bit: int) -> Callable[[bytes], int]:
     return lambda data: (data[0] >> bit) & 1
 
 
-_RIDE_MODES: dict[int, str] = {1: "Walk", 2: "Eco", 3: "Sport", 5: "Drive"}
+_RIDE_MODES: dict[int, str] = {1: "walk", 2: "eco", 3: "sport", 5: "drive"}
 
 
 def _ride_mode(data: bytes) -> str | int:
@@ -690,7 +690,7 @@ def _ride_mode(data: bytes) -> str | int:
     return _RIDE_MODES.get(data[0], data[0])
 
 
-_ENERGY_RECOVERY: dict[int, str] = {0: "Off", 1: "Low", 2: "Standard"}
+_ENERGY_RECOVERY: dict[int, str] = {0: "off", 1: "low", 2: "standard"}
 
 
 def _energy_recovery(data: bytes) -> str | int:
@@ -744,6 +744,9 @@ class V2Register:
     # A yes/no flag, shown as a binary sensor; device_class is then a binary
     # sensor class ("plug", "battery_charging").
     binary: bool = False
+    # A fixed set of named states. The names are translation keys; any other
+    # value the unpacker passes through shows as unknown.
+    options: tuple[str, ...] | None = None
 
 
 # Kick scooters (Max G3 and relatives). Every entry here was confirmed by
@@ -796,6 +799,7 @@ V2_VCU_REGISTERS: tuple[V2Register, ...] = (
         length=2,
         unpack=_ride_mode,
         primary=True,
+        options=tuple(_RIDE_MODES.values()),
     ),
     # Both counters below tick once per second while the vehicle is AWAKE, not
     # by wall clock: confirmed exactly, +5040 on each over 5040 s of a charge
@@ -877,6 +881,7 @@ V2_VCU_REGISTERS: tuple[V2Register, ...] = (
         index=0x70,
         length=2,
         unpack=_energy_recovery,
+        options=tuple(_ENERGY_RECOVERY.values()),
         primary=True,
     ),
 )
@@ -1171,16 +1176,16 @@ V2_NUMBER_CONTROLS: tuple[V2NumberControl, ...] = (
 V2_SELECT_CONTROLS: tuple[V2SelectControl, ...] = (
     V2SelectControl(
         key="Energy recovery", board=BOARD_KIND_VCU, index=0x70,
-        options={"Off": 0, "Low": 1, "Standard": 2},
+        options={"off": 0, "low": 1, "standard": 2},
     ),
     V2SelectControl(
         key="Start speed", board=BOARD_KIND_VCU, index=0x42,
-        options={"3 km/h": 3, "4 km/h": 4, "5 km/h": 5},
+        options={"3_kmh": 3, "4_kmh": 4, "5_kmh": 5},
     ),
     # What the leftmost handlebar button does. The values are not in the app's
     # order; each was read back after choosing it in the app (#8).
     V2SelectControl(
         key="Custom button", board=BOARD_KIND_VCU, index=0x4A,
-        options={"Hazard lights": 6, "Energy recovery level": 4, "Boost": 7},
+        options={"hazard_lights": 6, "energy_recovery_level": 4, "boost": 7},
     ),
 )

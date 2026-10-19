@@ -19,7 +19,7 @@ from homeassistant.helpers.restore_state import RestoreEntity
 
 from .const import DOMAIN, PROTOCOL_V2
 from .coordinator import NinebotCoordinator
-from .entity import NinebotEntity
+from .entity import NinebotEntity, translation_key_for
 from .ninebot_ble.protocol_v2 import BOARD_VCU, binary_registers
 
 
@@ -44,7 +44,7 @@ async def async_setup_entry(
 class NinebotPresence(NinebotEntity, BinarySensorEntity):
     """True while the scooter is within Bluetooth range."""
 
-    _attr_name = "In range"
+    _attr_translation_key = "in_range"
     _attr_device_class = BinarySensorDeviceClass.PRESENCE
 
     def __init__(self, coordinator: NinebotCoordinator) -> None:
@@ -72,7 +72,7 @@ class NinebotV2BinarySensor(NinebotEntity, BinarySensorEntity, RestoreEntity):
     def __init__(self, coordinator: NinebotCoordinator, reg) -> None:
         super().__init__(coordinator)
         self._reg = reg
-        self._attr_name = reg.key
+        self._attr_translation_key = translation_key_for(reg.key)
         self._attr_device_class = (
             BinarySensorDeviceClass(reg.device_class) if reg.device_class else None
         )
