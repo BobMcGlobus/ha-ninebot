@@ -163,7 +163,8 @@ is read back and an error is raised if the scooter did not accept it.
 | **Ninebot F3** | Encryption2 | ✅ Confirmed working — vehicle data plus a battery board: pack voltage, current, capacity, cell voltages, temperatures |
 | **Max G3 / G3 Plus** | Encryption2 | ✅ Confirmed working on **two** scooters — vehicle data plus the battery board: pack voltage, current, cell voltages, capacities, charger state, ride mode, energy recovery. Controls on one of them ([see above](#controls-on-the-newer-protocol-max-g3-and-relatives)). Needs the app's pairing password if already paired ([see below](#newer-models-and-the-account-lock)) |
 | **Max G2** | legacy | ✅ Confirmed working on one scooter bound to the Segway app — sensors, authenticating with the app's key as the **Pairing password** ([see below](#getting-in-anyway-reuse-the-apps-password)), alongside the app. Ride mode and the lock are not mapped for this model yet |
-| F2, F65, E-series | Encryption2 | Untested — reports welcome |
+| **Ninebot E2 Plus** | Encryption2 | ⚠️ Newer protocol over Nordic UART, but the handshake goes to board 0x21 (the classic numbering), which v0.19.1 tries. Needs the app's pairing password; which registers hold what is not mapped yet — [#17](https://github.com/BobMcGlobus/ha-ninebot/issues/17) |
+| F2, F65, other E-series | Encryption2 | Untested — reports welcome |
 
 **Works on every model, whatever the protocol:** presence (**In range**),
 **Signal strength** and **Last seen**. These come from the Bluetooth

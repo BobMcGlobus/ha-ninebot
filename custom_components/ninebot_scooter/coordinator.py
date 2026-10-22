@@ -40,6 +40,7 @@ from .const import (
     CONF_NO_BUTTON_PAIRING,
     CONF_V2_BMS_BOARD,
     CONF_V2_BOARD,
+    CONF_V2_BLE_BOARD,
     CONF_V2_GENERATION,
     CONF_V2_PASSWORD,
     DEFAULT_PARKED_POLL_INTERVAL,
@@ -161,6 +162,7 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if entry.data.get(CONF_V2_BOARD) is not None:
             self.protocol = PROTOCOL_V2
         self._v2_generation: str | None = entry.data.get(CONF_V2_GENERATION)
+        self._v2_ble_board: int | None = entry.data.get(CONF_V2_BLE_BOARD)
         stored_password = entry.data.get(CONF_V2_PASSWORD)
         self._v2_password: bytes | None = (
             bytes.fromhex(stored_password) if stored_password else None
@@ -535,7 +537,9 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         async with self._lock:
             ble_device = self._ble_device()
             client = NinebotV2Client(
-                password=self._v2_password, generation=self._v2_generation
+                password=self._v2_password,
+                generation=self._v2_generation,
+                ble_board=self._v2_ble_board,
             )
             try:
                 await client.connect(
@@ -585,6 +589,9 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if client.generation and client.generation != self._v2_generation:
             self._v2_generation = client.generation
             updates[CONF_V2_GENERATION] = client.generation
+        if client.ble_board and client.ble_board != self._v2_ble_board:
+            self._v2_ble_board = client.ble_board
+            updates[CONF_V2_BLE_BOARD] = client.ble_board
         if updates:
             self._persist(updates)
 

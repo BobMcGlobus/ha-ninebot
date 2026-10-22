@@ -65,6 +65,11 @@ VALID_SYNC2 = {0xA5, 0xB5}
 BOARD_DIS = 0x01  # dashboard on E-series; proxies values from sleeping boards
 BOARD_VCU = 0x16  # vehicle control unit; where kick scooters keep their data
 BOARD_BLE = 0x04
+# The Bluetooth board under the classic protocol's numbering. An E2 Plus speaks
+# the newer protocol but addresses its handshake here: a capture of the app shows
+# PRE_COMM going to 0x21, and our frame matches the app's byte for byte only with
+# that destination (#17). Sent to 0x04 it is ignored without a reply.
+BOARD_BLE_CLASSIC = 0x21
 
 # Commands
 CMD_READ = 0x01
@@ -150,7 +155,10 @@ class NinebotV2Client:
     """Talks Encryption2 to a single vehicle."""
 
     def __init__(
-        self, password: bytes | None = None, generation: str | None = None
+        self,
+        password: bytes | None = None,
+        generation: str | None = None,
+        ble_board: int | None = None,
     ) -> None:
         self.crypto = NbCryptoV2()
         self.client: BleakClient | None = None
@@ -170,6 +178,8 @@ class NinebotV2Client:
         self._write_uuid = WRITE_UUID
         self._sync2 = 0xA5
         self.generation: str | None = generation
+        # Which board takes the handshake; found by trying, like the generation.
+        self.ble_board: int | None = ble_board
         self._write_chars: list[str] = []
         self._notify_chars: list[str] = []
         # Replies we received but could not decrypt - see _set_password.
@@ -287,12 +297,16 @@ class NinebotV2Client:
         # silent way, so try the real ones rather than mixing them.
         response = None
         candidates = (self.generation,) if self.generation else (GEN3, GEN2)
+        boards = (self.ble_board,) if self.ble_board else (BOARD_BLE, BOARD_BLE_CLASSIC)
+        attempts = [
+            (with_response, board) for with_response in (False, True) for board in boards
+        ]
         for gen in candidates:
             spec = GENERATIONS[gen]
             if spec["write"] not in self._write_chars:
                 _LOGGER.debug("Skipping %s: no %s characteristic", gen, spec["write"][:8])
                 continue
-            for with_response in (False, True):
+            for with_response, board in attempts:
                 self._sync2 = spec["sync2"]
                 self._write_uuid = spec["write"]
                 self._write_with_response = with_response
@@ -304,23 +318,27 @@ class NinebotV2Client:
                     name.encode(), FW_DATA if spec["gen2_keystream"] else None
                 )
                 _LOGGER.debug(
-                    "PRE_COMM try: %s (sync 5A%02X, write %s, %s)",
+                    "PRE_COMM try: %s (sync 5A%02X, write %s, %s, board 0x%02X)",
                     gen,
                     spec["sync2"],
                     spec["write"][:8],
                     "with response" if with_response else "no response",
+                    board,
                 )
                 try:
                     response = await self._request(
-                        BOARD_BLE, CMD_PRE_COMM, 0, b"", expect=CMD_PRE_COMM, timeout=2.5
+                        board, CMD_PRE_COMM, 0, b"", expect=CMD_PRE_COMM, timeout=2.5
                     )
                 except TimeoutError:
                     continue
                 except Exception as err:  # noqa: BLE001 - a rejected write is informative
                     _LOGGER.debug("Write failed on this combination: %s", err)
                     continue
-                _LOGGER.info("Handshake accepted by the vehicle as %s", gen)
+                _LOGGER.info(
+                    "Handshake accepted by the vehicle as %s on board 0x%02X", gen, board
+                )
                 self.generation = gen
+                self.ble_board = board
                 break
             if response is not None:
                 break
@@ -329,7 +347,8 @@ class NinebotV2Client:
             raise TimeoutError(
                 "Vehicle never answered the handshake on any protocol generation "
                 "(tried 5AA5 over Nordic UART and 5AB5 over the Ninebot service, "
-                "with and without write acknowledgement). Make sure it is switched "
+                "addressed to board 0x04 and 0x21, with and without write "
+                "acknowledgement). Make sure it is switched "
                 "on and that the official Segway-Ninebot app is not connected"
             )
 
@@ -375,7 +394,7 @@ class NinebotV2Client:
         self.crypto.set_key(self.password, self._auth_param)
         try:
             auth = await self._request(
-                BOARD_BLE, CMD_AUTH, 0, payload, expect=CMD_AUTH, timeout=4
+                self.ble_board, CMD_AUTH, 0, payload, expect=CMD_AUTH, timeout=4
             )
         except TimeoutError:
             # Some models will not answer AUTH until the password has been
@@ -393,7 +412,7 @@ class NinebotV2Client:
             _LOGGER.debug("AUTH unanswered; re-asserting the password and retrying")
             try:
                 await self._request(
-                    BOARD_BLE,
+                    self.ble_board,
                     CMD_SET_PWD,
                     0,
                     self.password,
@@ -405,7 +424,7 @@ class NinebotV2Client:
             self.crypto.set_key(self.password, self._auth_param)
             try:
                 auth = await self._request(
-                    BOARD_BLE, CMD_AUTH, 0, payload, expect=CMD_AUTH, timeout=4
+                    self.ble_board, CMD_AUTH, 0, payload, expect=CMD_AUTH, timeout=4
                 )
             except TimeoutError:
                 # SET_PWD is the larger of the two at 29 bytes, so that is the bar.
@@ -465,7 +484,7 @@ class NinebotV2Client:
                 )
             try:
                 response = await self._request(
-                    BOARD_BLE, CMD_SET_PWD, 0, password, expect=CMD_SET_PWD, timeout=2.5
+                    self.ble_board, CMD_SET_PWD, 0, password, expect=CMD_SET_PWD, timeout=2.5
                 )
                 if response.index == 1:
                     self.password = password
