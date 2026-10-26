@@ -107,6 +107,13 @@ _PRESENCE_PUBLISH_EVERY = 300.0  # seconds
 # Budget held back from the poll timeout so that, when the classic handshake
 # fails, there is still time to try the newer protocol within the same poll.
 _V2_FALLBACK_RESERVE = 25.0
+# Serial prefixes of models that only ever work with the Segway app's key. On a
+# Max G2 a button pairing authorises one connection and replaces the app's own
+# pairing, so the app has to pair again (#16). Since v0.19.1 the newer
+# protocol's handshake answers on a G2 as well and would pair it that way
+# instead, and switch the entry over for good. Neither is worth breaking the
+# app for, so without the key nothing connects.
+_APP_KEY_ONLY_SERIES = ("02G",)
 
 # The scooter is often only awake for a minute or two, and reading every register
 # takes ~45 round trips - if the session ends early, whatever is read last is
@@ -460,6 +467,7 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Run ``action`` inside a fresh, authenticated legacy BLE session."""
         async with self._lock:
             ble_device = self._ble_device()
+            self._refuse_button_pairing(ble_device)
             app_key = self._segway_app_key()
             client = NinebotClient(
                 app_key=app_key or self._app_key, bound_to_app=app_key is not None
@@ -501,6 +509,10 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         Read from the entry on every connection rather than once at setup:
         changing only the password does not reload the entry.
         """
+        return self._stored_pairing_password()
+
+    def _stored_pairing_password(self) -> bytes | None:
+        """The Pairing password field as 16 bytes, or None if unset or invalid."""
         stored = self.config_entry.data.get(CONF_V2_PASSWORD) if self.config_entry else None
         if not stored:
             return None
@@ -509,6 +521,18 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except ValueError:
             return None
         return key if len(key) == 16 else None
+
+    def _refuse_button_pairing(self, ble_device: Any) -> None:
+        """Stop before connecting to a model that pairs only by breaking the app."""
+        serial = self.serial or getattr(ble_device, "name", None) or self.name or ""
+        if serial.startswith(_APP_KEY_ONLY_SERIES) and self._stored_pairing_password() is None:
+            raise UpdateFailed(
+                "This model only works with the Segway app's key, and none is set. "
+                "Pairing it by button lasts one connection and replaces the app's "
+                "own pairing, so the app would have to pair again. Set the app's "
+                "key as the Pairing password under Configure - see 'Getting in "
+                "anyway' in the README"
+            )
 
     def _ble_device(self):
         ble_device = bluetooth.async_ble_device_from_address(
@@ -536,6 +560,11 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Run ``action`` inside a fresh Encryption2 session (newer vehicles)."""
         async with self._lock:
             ble_device = self._ble_device()
+            self._refuse_button_pairing(ble_device)
+            # Read it on every connection, as the classic path does: changing
+            # only the password under Configure does not reload the entry, and
+            # the one loaded at setup stayed in use until a reload (#16).
+            self._v2_password = self._stored_pairing_password()
             client = NinebotV2Client(
                 password=self._v2_password,
                 generation=self._v2_generation,

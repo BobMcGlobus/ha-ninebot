@@ -162,7 +162,7 @@ is read back and an error is raised if the scooter did not accept it.
 | **Segway E110SE** | Encryption2 | ⚠️ Handshake completes with a recovered pairing password, then authentication goes unanswered — [#7](https://github.com/BobMcGlobus/ha-ninebot/issues/7) |
 | **Ninebot F3** | Encryption2 | ✅ Confirmed working — vehicle data plus a battery board: pack voltage, current, capacity, cell voltages, temperatures |
 | **Max G3 / G3 Plus** | Encryption2 | ✅ Confirmed working on **two** scooters — vehicle data plus the battery board: pack voltage, current, cell voltages, capacities, charger state, ride mode, energy recovery. Controls on one of them ([see above](#controls-on-the-newer-protocol-max-g3-and-relatives)). Needs the app's pairing password if already paired ([see below](#newer-models-and-the-account-lock)) |
-| **Max G2** | legacy | ✅ Confirmed working on one scooter bound to the Segway app — sensors, authenticating with the app's key as the **Pairing password** ([see below](#getting-in-anyway-reuse-the-apps-password)), alongside the app. Ride mode and the lock are not mapped for this model yet |
+| **Max G2** | legacy | ✅ Confirmed working on one scooter bound to the Segway app — sensors, authenticating with the app's key as the **Pairing password** ([see below](#getting-in-anyway-reuse-the-apps-password)), alongside the app; confirmed on a second one ([#16](https://github.com/BobMcGlobus/ha-ninebot/issues/16)). The key is required: pairing by button is refused on this model. Ride mode and the lock are not mapped for this model yet |
 | **Ninebot E2 Plus** | Encryption2 | ⚠️ Newer protocol over Nordic UART, but the handshake goes to board 0x21 (the classic numbering), which v0.19.1 tries. Needs the app's pairing password; which registers hold what is not mapped yet — [#17](https://github.com/BobMcGlobus/ha-ninebot/issues/17) |
 | F2, F65, other E-series | Encryption2 | Untested — reports welcome |
 
@@ -295,7 +295,14 @@ directly. Two ways to obtain it, both requiring access to your own devices:
 > `<SERIAL>_decrypt` value. On those it is the app key the scooter was bound with,
 > and given it the integration authenticates the way the app does: no button
 > press, no re-binding, and the app keeps working (just not at the same moment).
-> With the field empty, a classic scooter pairs by button exactly as before.
+> With the field empty, a classic scooter pairs by button exactly as before -
+> **except a Max G2, which needs the key**: a button pairing there lasts a single
+> connection and replaces the app's own pairing, so the integration refuses it
+> ([#16](https://github.com/BobMcGlobus/ha-ninebot/issues/16)).
+>
+> Both ways below give you the key. On a G2 the capture route works too:
+> `extract_pairing_password.py` on a capture of the app pairing anew reports it
+> as a gen2 password, and that value is the key the classic handshake needs.
 
 **From the app's local data** — the app keeps its own copy, keyed by serial:
 

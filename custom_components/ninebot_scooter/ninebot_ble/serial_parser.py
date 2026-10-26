@@ -8,6 +8,10 @@ class SerialParser:
         E = "N2G"
         MAX = "N4G"
         F = "N5G"
+        MAX_G2 = "02G"
+
+    # Series whose version letters are not mapped, named as a whole.
+    SERIES_NAMES = {ProductSeries.MAX_G2: "Max G2"}
 
     PRODUCT_VERSION_MAPPING = {
         ProductSeries.E: {
@@ -77,7 +81,7 @@ class SerialParser:
     @property
     def product_version(self) -> str:
         if self._product_version is None:
-            return str(self.product_series) + "-series"
+            return self.SERIES_NAMES.get(self.product_series, str(self.product_series) + "-series")
         return self._product_version
 
     def __str__(self) -> str:
