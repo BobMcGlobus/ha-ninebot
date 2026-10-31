@@ -184,6 +184,8 @@ class NinebotV2Client:
         self._notify_chars: list[str] = []
         # Replies we received but could not decrypt - see _set_password.
         self._undecryptable = 0
+        # The last frames we sent, as they went out, to recognise echoes.
+        self._recent_tx: list[bytes] = []
 
     @property
     def is_connected(self) -> bool:
@@ -411,13 +413,15 @@ class NinebotV2Client:
             # poll.
             _LOGGER.debug("AUTH unanswered; re-asserting the password and retrying")
             try:
+                # The app's capture of an E110SE has the vehicle acknowledge
+                # SET_PWD about 3.5 s after it was sent (#7), too close to 4.
                 await self._request(
                     self.ble_board,
                     CMD_SET_PWD,
                     0,
                     self.password,
                     expect=CMD_SET_PWD,
-                    timeout=4,
+                    timeout=8,
                 )
             except TimeoutError:
                 _LOGGER.debug("SET_PWD not acknowledged either; continuing anyway")
@@ -597,6 +601,7 @@ class NinebotV2Client:
     async def _send(self, plaintext: bytes) -> None:
         assert self.client is not None, "Must be connected first"
         data = self.crypto.encrypt(plaintext)
+        self._recent_tx = [*self._recent_tx[-3:], data]
         _LOGGER.debug(
             "TX plain %s -> enc %s (%d bytes, %s)",
             _loggable(plaintext),
@@ -658,8 +663,25 @@ class NinebotV2Client:
             raw = bytes(self._rx_buffer[:total])
             del self._rx_buffer[:total]
 
+            # An E110SE sends back what we wrote before it answers - only the
+            # first 20 bytes, as much as one notification holds at MTU 23 - and
+            # its real reply follows straight on. Taken at the length in the
+            # echo's header, the echo swallowed the reply's first bytes and the
+            # reply was lost (#7). Skip the echo and resume right after it.
+            echo = self._echo_length(raw)
+            if echo:
+                self._rx_buffer[:0] = raw[echo:]
+                _LOGGER.debug("Ignoring the vehicle's echo of our own frame (%d bytes)", echo)
+                continue
+
             plaintext, status = self.crypto.decrypt(raw)
             if status != 0:
+                # Whatever this was, a frame may start inside it; resume there
+                # rather than drop it with the rest.
+                resync = _next_sync(raw, 2)
+                if resync is not None:
+                    self._rx_buffer[:0] = raw[resync:]
+                    raw = raw[:resync]
                 # A reply we cannot decrypt is indistinguishable from no reply at
                 # all unless we say so: -2 means the key is wrong, -3 a replay.
                 self._undecryptable += 1
@@ -678,6 +700,34 @@ class NinebotV2Client:
                 self._queue.get_nowait()
             self._queue.put_nowait(frame)
 
+
+    def _echo_length(self, raw: bytes) -> int:
+        """How many leading bytes of ``raw`` echo a frame we just sent, or 0.
+
+        A whole frame sent back, or a cut-off start of one followed by the next
+        frame's sync bytes. Matching only a few header bytes would not do: the
+        header is the same for every frame of a length.
+        """
+        for sent in self._recent_tx:
+            common = 0
+            for ours, theirs in zip(sent, raw):
+                if ours != theirs:
+                    break
+                common += 1
+            if common == len(sent) or (
+                common >= 9 and raw[common : common + 2] in _SYNC_MARKERS
+            ):
+                return common
+        return 0
+
+
+_SYNC_MARKERS = (bytes([SYNC1, 0xA5]), bytes([SYNC1, 0xB5]))
+
+
+def _next_sync(data: bytes, start: int) -> int | None:
+    """Offset of the first sync marker at or after ``start``, if any."""
+    found = [i for i in (data.find(m, start) for m in _SYNC_MARKERS) if i >= 0]
+    return min(found) if found else None
 
 # --- Register map -----------------------------------------------------------
 # Register indexes are per board, and the boards differ by vehicle class, so a
