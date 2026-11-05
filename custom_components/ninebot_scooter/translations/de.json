@@ -156,6 +156,9 @@
       "start_speed": {
         "name": "Startgeschwindigkeit",
         "state": {
+          "0_kmh": "0 km/h",
+          "1_kmh": "1 km/h",
+          "2_kmh": "2 km/h",
           "3_kmh": "3 km/h",
           "4_kmh": "4 km/h",
           "5_kmh": "5 km/h"

@@ -67,8 +67,8 @@ async def async_get_config_entry_diagnostics(
         # Nordic UART UUIDs (6e400001-b5a3-...) mean this integration's protocol
         # may apply, other variants mean a newer, unsupported scheme.
         "gatt_services": coordinator.gatt_services,
-        # AUTH and SET_PWD are 27 and 29 bytes and have to arrive in one write,
-        # so a link stuck at the minimum MTU of 23 cannot authenticate at all.
+        # AUTH and SET_PWD are 27 and 29 bytes, so a link stuck at the minimum
+        # MTU of 23 has to send them in pieces.
         # None means the stack only had a placeholder to report.
         "link": {"mtu": coordinator.link_mtu},
     }

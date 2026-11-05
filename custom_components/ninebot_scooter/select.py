@@ -115,10 +115,18 @@ class NinebotV2Select(NinebotEntity, SelectEntity):
         super().__init__(coordinator)
         self._control = control
         self._attr_translation_key = translation_key_for(control.key)
-        self._attr_options = list(control.options)
         self._attr_unique_id = f"{coordinator.address}_v2ctl_{control.index:02X}"
         self._attr_entity_registry_enabled_default = not control.sensitive
-        self._from_value = {v: k for k, v in control.options.items()}
+        self._from_value = {
+            v: k for k, v in {**control.shown_only, **control.options}.items()
+        }
+
+    @property
+    def options(self) -> list[str]:
+        """The writable options, plus the current value if it is one we only show."""
+        writable = list(self._control.options)
+        current = self.current_option
+        return writable if current is None or current in writable else [current, *writable]
 
     @property
     def current_option(self) -> str | None:
@@ -131,6 +139,8 @@ class NinebotV2Select(NinebotEntity, SelectEntity):
         return super().available and board is not None
 
     async def async_select_option(self, option: str) -> None:
+        if option not in self._control.options:
+            return  # the value the scooter already holds; nothing to write
         board = self.coordinator.v2_board_for(self._control.board)
         if board is None:
             raise HomeAssistantError(

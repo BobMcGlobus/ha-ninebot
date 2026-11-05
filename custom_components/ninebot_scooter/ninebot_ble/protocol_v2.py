@@ -13,7 +13,7 @@ import logging
 import secrets
 import struct
 import warnings
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from bleak import BleakClient
@@ -132,10 +132,9 @@ def _loggable(plaintext: bytes) -> str:
 def _link_mtu(client: BleakClient) -> int | None:
     """The ATT MTU the link negotiated, or None if the stack does not know it.
 
-    AUTH and SET_PWD are 27 and 29 bytes and must arrive as one write. A link
-    left at the minimum MTU of 23 carries 20 bytes per write, and a frame cut
-    short is dropped by the vehicle without a word - so this is the first thing
-    to know when those two go unanswered while the 13-byte PRE_COMM works.
+    AUTH and SET_PWD are 27 and 29 bytes. A link left at the minimum MTU of 23
+    carries 20 bytes per write, so those two go out in pieces - the first thing
+    to know when they go unanswered while the 13-byte PRE_COMM works.
 
     A Bluetooth proxy reports the value it negotiated. BlueZ reports 23 as a
     placeholder until the MTU is acquired, and warns while doing it; that
@@ -436,10 +435,10 @@ class NinebotV2Client:
                     raise TimeoutError(
                         f"Vehicle did not answer authentication. This link reports "
                         f"an MTU of {self.mtu}, which carries {self.mtu - 3} bytes "
-                        f"per write, and the authentication frames are 27 and 29 - "
-                        f"they cannot arrive whole, and a partial frame is dropped "
-                        f"silently. If you connect through a Bluetooth proxy, try a "
-                        f"local adapter or a proxy that negotiates a larger MTU"
+                        f"per write, so the 27 and 29 byte authentication frames "
+                        f"went out in pieces, which not every vehicle may accept. "
+                        f"If you connect through a Bluetooth proxy, try a local "
+                        f"adapter or a proxy that negotiates a larger MTU"
                     ) from None
                 raise TimeoutError(
                     "Vehicle did not answer authentication, with or without "
@@ -609,20 +608,27 @@ class NinebotV2Client:
             len(data),
             "with response" if self._write_with_response else "no response",
         )
-        # One protocol frame must go out as a single ATT write. The CBC-MAC covers
-        # the whole frame, so splitting it hands the vehicle two malformed frames
-        # instead of one valid one: it drops both without replying, which looks
-        # exactly like a pairing refusal. That silent failure cost the entire
+        # A frame goes out as one ATT write whenever the link can carry it. The
+        # CBC-MAC covers the whole frame, and splitting one cost the entire
         # handshake on every frame over 20 bytes - AUTH (27) and SET_PWD (29) -
         # while PRE_COMM (13) kept working and made it look model-specific.
         #
-        # Deliberately not gated on client.mtu_size: on BlueZ that is bleak's
-        # placeholder 23 until the MTU is actually acquired, so gating on it would
-        # reject frames the link accepts. Links that really are too small surface
-        # as a write error or a missing reply, with the size logged above.
-        await self.client.write_gatt_char(
-            self._write_uuid, data, response=self._write_with_response
-        )
+        # A link stuck at the minimum MTU cannot carry those two at all: the
+        # write is cut to 20 bytes and the rest is lost. There pieces are the only
+        # way, and an E110SE behind an ESP32 proxy shows they can work: it held
+        # the 20 bytes it got and took 7 from the next write to reach the length
+        # in the header, so it assembles a frame across writes (#7).
+        #
+        # Gated on self.mtu, not client.mtu_size: that is None for BlueZ's
+        # placeholder 23, so a link that has not said how small it is still gets
+        # a single write.
+        size = self.mtu - 3 if self.mtu else len(data)
+        for start in range(0, len(data), size):
+            await self.client.write_gatt_char(
+                self._write_uuid,
+                data[start : start + size],
+                response=self._write_with_response,
+            )
 
     def _drain(self) -> None:
         while not self._queue.empty():
@@ -663,11 +669,11 @@ class NinebotV2Client:
             raw = bytes(self._rx_buffer[:total])
             del self._rx_buffer[:total]
 
-            # An E110SE sends back what we wrote before it answers - only the
-            # first 20 bytes, as much as one notification holds at MTU 23 - and
-            # its real reply follows straight on. Taken at the length in the
-            # echo's header, the echo swallowed the reply's first bytes and the
-            # reply was lost (#7). Skip the echo and resume right after it.
+            # An E110SE sends back the frames it takes in, ours included. With
+            # writes cut to 20 bytes that came back as those 20 and the first 7
+            # of our next frame (#7). Decrypting it would count as a reply we
+            # cannot read, which during pairing means "bound to another client".
+            # Skip it and resume right after it.
             echo = self._echo_length(raw)
             if echo:
                 self._rx_buffer[:0] = raw[echo:]
@@ -963,9 +969,9 @@ V2_VCU_REGISTERS: tuple[V2Register, ...] = (
 #
 # 0x43-0x48 read constant because they are settings rather than measurements:
 # two per-mode speed limits in km/h packed into each register, which is why 0x47
-# reads 5388 here and 5132 on a Max G3. 0x6E (1..3, likely regen level) and 0x42
-# (0..5, meaning unknown) are the same kind of thing. All are app-writable and
-# belong in a control, not a sensor.
+# reads 5388 here and 5132 on a Max G3. 0x6E (1..3) and 0x42, the start speed, are
+# the same kind of thing. All are app-writable and belong in a control, not a
+# sensor.
 #
 # 0x6A is 1 only while the pack is taking charge and 0 at 100 % or just after
 # re-plugging - close enough to 0x1C bit 2 that one of the two must be misread,
@@ -1215,6 +1221,9 @@ class V2SelectControl:
     options: dict[str, int]
     acked: bool = False
     sensitive: bool = False
+    # Values the scooter may hold that this control never writes. Shown as they
+    # are rather than as "unknown".
+    shown_only: dict[str, int] = field(default_factory=dict)
 
 
 def control_data_key(control: V2NumberControl | V2SelectControl) -> str:
@@ -1250,6 +1259,10 @@ V2_SELECT_CONTROLS: tuple[V2SelectControl, ...] = (
     V2SelectControl(
         key="Start speed", board=BOARD_KIND_VCU, index=0x42,
         options={"3_kmh": 3, "4_kmh": 4, "5_kmh": 5},
+        # What the app offers depends on the country: 3-5 on a German G3, while
+        # a Dutch one sits at 0 (#18) and an F3 reads 0-5. The integration cannot
+        # tell which it is talking to, so it writes only what all of them take.
+        shown_only={"0_kmh": 0, "1_kmh": 1, "2_kmh": 2},
     ),
     # What the leftmost handlebar button does. The values are not in the app's
     # order; each was read back after choosing it in the app (#8).

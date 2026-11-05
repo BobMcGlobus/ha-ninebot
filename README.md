@@ -56,7 +56,9 @@ the integration sends the same command the app does, and reads the value back to
 confirm it took:
 
 - **Energy recovery** (select): Off / Low / Standard
-- **Start speed** (select): 3 / 4 / 5 km/h
+- **Start speed** (select): 3 / 4 / 5 km/h. What the app offers depends on the
+  country; a scooter set to something else, such as 0 km/h, shows that value,
+  but the integration only sets these three
 - **Charge limit** (number): 80–100 %
 - **Auto power-off** (number): 1–30 min
 - **Sound volume** (number): 5–100 %
