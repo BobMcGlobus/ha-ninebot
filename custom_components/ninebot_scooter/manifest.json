@@ -9,6 +9,7 @@
       "manufacturer_id": 17230
     }
   ],
+  "categories": ["vehicles_transport.bikes_scooters"],
   "codeowners": [
     "@BobMcGlobus"
   ],
