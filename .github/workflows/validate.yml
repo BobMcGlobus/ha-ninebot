@@ -23,7 +23,6 @@ jobs:
       - uses: hacs/action@main
         with:
           category: integration
-          ignore: brands
 
   names:
     # hassfest and HACS never import the code, so a missing import only shows

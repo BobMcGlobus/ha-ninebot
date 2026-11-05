@@ -10,8 +10,8 @@ See [Model support](#model-support) for what is confirmed on real hardware, and
 [the account lock](#newer-models-and-the-account-lock) if a newer scooter refuses
 to pair.
 
-> **Status: beta.** Sensors and controls are confirmed working on a **MAX G30D**
-> and an **F65I**; sensors on an **F40** and a **Max G3**.
+> **Status: beta.** Sensors and controls are confirmed working on a **MAX G30D**,
+> an **F65I** and a **Max G3**; sensors on an **F40**.
 > Started as a packaged, HACS-installable fork of
 > [ownbee/ninebot-integration](https://github.com/ownbee/ninebot-integration) +
 > [ownbee/ninebot-ble](https://github.com/ownbee/ninebot-ble), with the protocol
@@ -402,13 +402,31 @@ registers a model really uses.
 - Firmware new enough to speak the encrypted (miauth) protocol — very old
   firmwares may not work.
 
-## Installation (HACS)
+## Installation
 
-Until this is in the default HACS store, add it as a **custom repository**:
+### Home Assistant 2026.11 and newer
+
+[![Open your Home Assistant instance and open this repository in the Marketplace.](https://my.home-assistant.io/badges/marketplace_repository.svg)](https://my.home-assistant.io/redirect/marketplace_repository/?owner=BobMcGlobus&repository=ha-ninebot&category=integration)
+
+Until this is in the default catalog, add it as a **custom repository**:
+
+1. **Settings → Marketplace**, and connect your GitHub account. Adding a
+   repository by link needs it, and without it **you get no updates** for this
+   integration.
+2. **Add from link**, enter `BobMcGlobus/ha-ninebot`, then **Add**.
+3. Install **Ninebot Scooter**.
+
+Home Assistant checks a custom repository for updates every 48 hours. After an
+update, restart Home Assistant to apply it. To test pre-releases, turn on the
+**Pre-release** switch on the repository's device page under *Marketplace*.
+
+### Older versions, with HACS
 
 1. HACS → three-dot menu → **Custom repositories**
 2. Repository: `https://github.com/BobMcGlobus/ha-ninebot`, category **Integration**
 3. Install **Ninebot Scooter**, then restart Home Assistant.
+
+### Adding the scooter
 
 The scooter is auto-discovered via its Bluetooth advertisement. Go to
 **Settings → Devices & Services**, you should see a discovered *Ninebot* device —
