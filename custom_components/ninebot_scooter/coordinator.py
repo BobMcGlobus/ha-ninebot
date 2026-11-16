@@ -732,10 +732,21 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
 
     def v2_board_for(self, board_kind: str) -> int | None:
-        """The actual board index for a control's VCU/BMS kind on this vehicle."""
+        """The actual board index for a control's VCU/BMS kind on this vehicle.
+
+        The VCU controls were mapped on a Max G3, whose data board is the VCU. A
+        vehicle that keeps its data elsewhere - an E110SE answers on the
+        dashboard - has other registers at those indexes, and handing it the
+        data board made the controls read them and would have written them
+        (#7). So a VCU control gets a board only when the data board is the VCU.
+        """
         if board_kind == BOARD_KIND_BMS:
             return self._v2_bms_board
-        return self._v2_board
+        return self._v2_board if self._v2_board == BOARD_VCU else None
+
+    def v2_control_applies(self, control: Any) -> bool:
+        """Whether a control can exist on this vehicle, before or after its board is known."""
+        return control.board == BOARD_KIND_BMS or self._v2_board in (None, BOARD_VCU)
 
     async def async_write_v2(
         self, board: int, index: int, value: int, *, length: int = 2, acked: bool = True
@@ -950,7 +961,11 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # board did not answer. These must not fail the poll - a model may not
         # have every one - so a silent control is simply left unset.
         for control in (*V2_NUMBER_CONTROLS, *V2_SELECT_CONTROLS):
-            ctrl_board = bms_board if control.board == BOARD_KIND_BMS else board
+            ctrl_board = (
+                bms_board
+                if control.board == BOARD_KIND_BMS
+                else board if board == BOARD_VCU else None
+            )
             if ctrl_board is None:
                 continue
             try:

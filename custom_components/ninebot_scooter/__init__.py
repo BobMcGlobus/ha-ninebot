@@ -10,7 +10,12 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 
 from .const import CONF_APP_KEY, DOMAIN, PLATFORMS, PROTOCOL_V2
-from .ninebot_ble.protocol_v2 import BOARD_VCU, binary_registers
+from .ninebot_ble.protocol_v2 import (
+    BOARD_VCU,
+    V2_NUMBER_CONTROLS,
+    V2_SELECT_CONTROLS,
+    binary_registers,
+)
 from .services import async_setup_services
 from .coordinator import NinebotCoordinator
 
@@ -84,10 +89,22 @@ def _async_drop_stale_entities(
         )
     }
 
+    # Controls that do not apply to this vehicle, such as the Max G3's VCU
+    # controls on a vehicle whose data board is the dashboard (#7).
+    controls = {
+        f"{address}_v2ctl_{control.index:02X}"
+        for control in (*V2_NUMBER_CONTROLS, *V2_SELECT_CONTROLS)
+        if coordinator.v2_control_applies(control)
+    }
+
     registry = er.async_get(hass)
     removed = 0
     for reg_entry in er.async_entries_for_config_entry(registry, entry.entry_id):
         unique_id = reg_entry.unique_id
+        if unique_id.startswith(f"{address}_v2ctl_") and unique_id not in controls:
+            registry.async_remove(reg_entry.entity_id)
+            removed += 1
+            continue
         # 0x70 went out in v0.18 as "Ride mode" and is the energy recovery level.
         # The control's unique id does not carry the name, so it is re-created once
         # to lose the old entity id. The "Ride mode" sensor keeps its id and now

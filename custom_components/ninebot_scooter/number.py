@@ -47,7 +47,9 @@ async def async_setup_entry(
     coordinator: NinebotCoordinator = hass.data[DOMAIN][entry.entry_id]
     if coordinator.protocol == PROTOCOL_V2:
         async_add_entities(
-            NinebotV2Number(coordinator, control) for control in V2_NUMBER_CONTROLS
+            NinebotV2Number(coordinator, control)
+            for control in V2_NUMBER_CONTROLS
+            if coordinator.v2_control_applies(control)
         )
         return
     async_add_entities(
