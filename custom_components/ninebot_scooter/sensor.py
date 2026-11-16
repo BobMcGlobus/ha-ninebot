@@ -21,6 +21,7 @@ from .const import DOMAIN, PROTOCOL_V2
 from .coordinator import NinebotCoordinator
 from .entity import NinebotEntity, translation_key_for
 from .ninebot_ble import BmsIdx, CtrlIdx, get_register_desc, iter_register
+from .ninebot_ble.e2 import E2_RIDE_MODE_KEY, E2_RIDE_MODES
 from .ninebot_ble.protocol_v2 import BOARD_VCU, V2_BMS_REGISTERS, registers_for_board
 
 # Registers exposed as writable controls (switch/select/number) instead of sensors.
@@ -185,6 +186,17 @@ async def async_setup_entry(
         )
     else:
         descriptions = _build_descriptions()
+        if coordinator.is_e2:
+            descriptions.insert(
+                0,
+                NinebotSensorEntityDescription(
+                    key=E2_RIDE_MODE_KEY,
+                    reg_key=E2_RIDE_MODE_KEY,
+                    translation_key="ride_mode",
+                    device_class=SensorDeviceClass.ENUM,
+                    options=list(E2_RIDE_MODES.values()),
+                ),
+            )
 
     entities: list[SensorEntity] = [
         NinebotSensor(coordinator, description) for description in descriptions

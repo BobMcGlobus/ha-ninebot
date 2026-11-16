@@ -15,6 +15,7 @@ from .coordinator import NinebotCoordinator
 from .entity import NinebotEntity, translation_key_for
 from .ninebot_ble import CtrlIdx
 from .ninebot_ble.register import KersLevel, OperationMode
+from .ninebot_ble.e2 import E2_SELECT_CONTROLS, e2_data_key
 from .ninebot_ble.protocol_v2 import V2_SELECT_CONTROLS, control_data_key
 
 
@@ -67,6 +68,12 @@ async def async_setup_entry(
             NinebotV2Select(coordinator, control)
             for control in V2_SELECT_CONTROLS
             if coordinator.v2_control_applies(control)
+        )
+        return
+    if coordinator.is_e2:
+        # The G30's ride mode and KERS registers mean other things on an E2.
+        async_add_entities(
+            NinebotE2Select(coordinator, control) for control in E2_SELECT_CONTROLS
         )
         return
     async_add_entities(NinebotSelect(coordinator, desc) for desc in SELECTS)
@@ -157,3 +164,41 @@ class NinebotV2Select(NinebotEntity, SelectEntity):
                 f"The scooter did not accept {self._control.key} = {option}"
             )
         await self.coordinator.async_request_refresh()
+
+
+class NinebotE2Select(NinebotEntity, SelectEntity):
+    """A setting on an E2-family scooter, from E2_SELECT_CONTROLS."""
+
+    _attr_entity_category = EntityCategory.CONFIG
+
+    def __init__(self, coordinator: NinebotCoordinator, control) -> None:
+        super().__init__(coordinator)
+        self._control = control
+        self._attr_translation_key = translation_key_for(control.key)
+        self._attr_unique_id = f"{coordinator.address}_e2ctl_{control.index:02X}"
+        self._from_value = {
+            v: k for k, v in {**control.shown_only, **control.options}.items()
+        }
+
+    @property
+    def options(self) -> list[str]:
+        """The writable options, plus the current value if it is one we only show."""
+        writable = list(self._control.options)
+        current = self.current_option
+        return writable if current is None or current in writable else [current, *writable]
+
+    @property
+    def current_option(self) -> str | None:
+        value = (self.coordinator.data or {}).get(e2_data_key(self._control.index))
+        return self._from_value.get(value)
+
+    async def async_select_option(self, option: str) -> None:
+        if option not in self._control.options:
+            return  # the value the scooter already holds; nothing to write
+        value = self._control.options[option]
+        readback = await self.coordinator.async_write_e2(self._control.index, value)
+        if readback != value:
+            raise HomeAssistantError(
+                f"The scooter did not accept {self._control.key} = {option} "
+                f"(it now reports {readback})"
+            )

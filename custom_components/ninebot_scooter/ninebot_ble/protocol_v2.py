@@ -65,10 +65,11 @@ VALID_SYNC2 = {0xA5, 0xB5}
 BOARD_DIS = 0x01  # dashboard on E-series; proxies values from sleeping boards
 BOARD_VCU = 0x16  # vehicle control unit; where kick scooters keep their data
 BOARD_BLE = 0x04
-# The Bluetooth board under the classic protocol's numbering. An E2 Plus speaks
-# the newer protocol but addresses its handshake here: a capture of the app shows
-# PRE_COMM going to 0x21, and our frame matches the app's byte for byte only with
-# that destination (#17). Sent to 0x04 it is ignored without a reply.
+# The Bluetooth board under the classic protocol's numbering. The handshake's
+# first frame is the classic INIT (0x5B) under another name, sent from the
+# phone's address, so a classic vehicle that only answers the phone - an E2 Plus,
+# a Max G2 - answers it here (#17). Such a vehicle is classic, though, and is
+# read through the classic path with the app's key; see NinebotClient.
 BOARD_BLE_CLASSIC = 0x21
 
 # Commands

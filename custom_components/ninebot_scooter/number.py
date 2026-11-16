@@ -52,6 +52,8 @@ async def async_setup_entry(
             if coordinator.v2_control_applies(control)
         )
         return
+    if coordinator.is_e2:
+        return  # where an E2 keeps its speed limits is not known
     async_add_entities(
         [NinebotMaxSpeedNumber(coordinator), NinebotSpeedReleaseNumber(coordinator)]
     )

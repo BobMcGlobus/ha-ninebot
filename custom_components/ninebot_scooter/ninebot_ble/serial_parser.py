@@ -9,9 +9,10 @@ class SerialParser:
         MAX = "N4G"
         F = "N5G"
         MAX_G2 = "02G"
+        E2 = "N2T"
 
     # Series whose version letters are not mapped, named as a whole.
-    SERIES_NAMES = {ProductSeries.MAX_G2: "Max G2"}
+    SERIES_NAMES = {ProductSeries.MAX_G2: "Max G2", ProductSeries.E2: "E2"}
 
     PRODUCT_VERSION_MAPPING = {
         ProductSeries.E: {

@@ -73,6 +73,9 @@ def _async_drop_stale_entities(
     Bluetooth advertisement, which work on any model. Anything else in this
     entry is left over from a layout we no longer produce.
     """
+    if coordinator.is_e2:
+        _async_drop_g30_controls(hass, entry)
+        return
     if coordinator.protocol != PROTOCOL_V2:
         return
 
@@ -127,6 +130,27 @@ def _async_drop_stale_entities(
             removed,
             entry.title,
         )
+
+
+def _async_drop_g30_controls(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Remove the G30's controls from an E2, where they wrote the wrong registers."""
+    address = entry.unique_id
+    stale = {
+        f"{address}_{key}"
+        for key in (
+            "cruise_control",
+            "tail_light",
+            "operating_mode",
+            "kers_level",
+            "max_speed",
+            "speed_release",
+            "lock",
+        )
+    }
+    registry = er.async_get(hass)
+    for reg_entry in er.async_entries_for_config_entry(registry, entry.entry_id):
+        if reg_entry.unique_id in stale:
+            registry.async_remove(reg_entry.entity_id)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

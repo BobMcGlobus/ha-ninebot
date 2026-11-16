@@ -452,6 +452,18 @@ class NinebotClient:
         )
         return list(resp.data_segment[:length])
 
+    async def write_raw(self, board: int, index: int, value: int) -> None:
+        """Write a 16-bit value to a register by its raw address (0x03, no reply).
+
+        Read the register back to confirm, as the official app does.
+        """
+        target = DeviceId(board)
+        payload = [value & 0xFF, (value >> 8) & 0xFF]
+        _LOGGER.debug("Writing 0x%02X on board 0x%02X = %d", index, board, value)
+        await self.send(
+            Packet(self.source, target, Command.WRITE_ACK_NO_REPLY, index, payload)
+        )
+
     async def read_reg(self, index: CtrlIdx | BmsIdx) -> Any:
         """Read scooter memory register.
 

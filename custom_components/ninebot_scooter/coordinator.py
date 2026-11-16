@@ -40,6 +40,7 @@ from .const import (
     CONF_NO_BUTTON_PAIRING,
     CONF_V2_BMS_BOARD,
     CONF_V2_BOARD,
+    CONF_MODEL_FAMILY,
     CONF_V2_BLE_BOARD,
     CONF_V2_GENERATION,
     CONF_V2_PASSWORD,
@@ -51,6 +52,14 @@ from .const import (
     PROTOCOL_V2,
 )
 from .ninebot_ble import BmsIdx, CtrlIdx, NinebotClient, iter_register
+from .ninebot_ble.e2 import (
+    E2_PREFIXES,
+    E2_RIDE_MODE_INDEX,
+    E2_RIDE_MODE_KEY,
+    E2_RIDE_MODES,
+    E2_SELECT_CONTROLS,
+    e2_data_key,
+)
 from .ninebot_ble.protocol_v2 import (
     BOARD_DIS,
     BOARD_KIND_BMS,
@@ -66,6 +75,7 @@ from .ninebot_ble.protocol_v2 import (
     registers_for_board,
 )
 from .ninebot_ble.serial_parser import SerialParser
+from .ninebot_ble.transport import DeviceId
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -112,8 +122,9 @@ _V2_FALLBACK_RESERVE = 25.0
 # pairing, so the app has to pair again (#16). Since v0.19.1 the newer
 # protocol's handshake answers on a G2 as well and would pair it that way
 # instead, and switch the entry over for good. Neither is worth breaking the
-# app for, so without the key nothing connects.
-_APP_KEY_ONLY_SERIES = ("02G",)
+# app for, so without the key nothing connects. An E2 Plus keeps one key too,
+# and answers the classic handshake only from the phone's address (#17).
+_APP_KEY_ONLY_SERIES = ("02G", *E2_PREFIXES)
 
 # The scooter is often only awake for a minute or two, and reading every register
 # takes ~45 round trips - if the session ends early, whatever is read last is
@@ -170,6 +181,7 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.protocol = PROTOCOL_V2
         self._v2_generation: str | None = entry.data.get(CONF_V2_GENERATION)
         self._v2_ble_board: int | None = entry.data.get(CONF_V2_BLE_BOARD)
+        self._model_family: str | None = entry.data.get(CONF_MODEL_FAMILY)
         stored_password = entry.data.get(CONF_V2_PASSWORD)
         self._v2_password: bytes | None = (
             bytes.fromhex(stored_password) if stored_password else None
@@ -744,6 +756,15 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return self._v2_bms_board
         return self._v2_board if self._v2_board == BOARD_VCU else None
 
+    @property
+    def is_e2(self) -> bool:
+        """Whether this is a classic E2-family scooter, with its own settings."""
+        if self.protocol == PROTOCOL_V2:
+            return False
+        return self._model_family == "e2" or (self.serial or self.name or "").startswith(
+            E2_PREFIXES
+        )
+
     def v2_control_applies(self, control: Any) -> bool:
         """Whether a control can exist on this vehicle, before or after its board is known."""
         return control.board == BOARD_KIND_BMS or self._v2_board in (None, BOARD_VCU)
@@ -1013,6 +1034,12 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     # not know (a Max G2 starts "02G"). Storing it only after a
                     # successful parse meant re-reading it on every poll, forever.
                     self.serial = raw_serial
+                    # The entities depend on it, and a renamed entry no longer
+                    # carries the advertised name, so remember it.
+                    if raw_serial.startswith(E2_PREFIXES) and self._model_family != "e2":
+                        self._model_family = "e2"
+                        self._persist({CONF_MODEL_FAMILY: "e2"})
+                        self._entities_stale = True
                     parsed = SerialParser(raw_serial)
                     self.model = str(parsed)
                     self.hw_version = (
@@ -1057,6 +1084,18 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                             )
                             data[str(idx)] = retry
                             break
+
+            if self.is_e2:
+                for index in (*(c.index for c in E2_SELECT_CONTROLS), E2_RIDE_MODE_INDEX):
+                    try:
+                        raw = await client.read_raw(DeviceId.ES_CONTROL.value, index, 2)
+                    except Exception as err:  # noqa: BLE001
+                        _LOGGER.debug("E2 setting 0x%02X did not read: %s", index, err)
+                        continue
+                    if len(raw) >= 2:
+                        data[e2_data_key(index)] = raw[0] | raw[1] << 8
+                mode = data.get(e2_data_key(E2_RIDE_MODE_INDEX))
+                data[E2_RIDE_MODE_KEY] = E2_RIDE_MODES.get(mode) if mode is not None else None
 
             if not data:
                 # Nothing came back at all: the session is not usable. Fail the
@@ -1123,6 +1162,20 @@ class NinebotCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 result.name if isinstance(result, enum.Enum) else result
             )
             self.async_set_updated_data(updated)
+        return result
+
+    async def async_write_e2(self, index: int, value: int) -> int | None:
+        """Write an E2 controller setting and read it back, as the app does."""
+
+        async def _write_read(client: NinebotClient) -> int | None:
+            await client.write_raw(DeviceId.ES_CONTROL.value, index, value)
+            await asyncio.sleep(0.5)
+            raw = await client.read_raw(DeviceId.ES_CONTROL.value, index, 2)
+            return raw[0] | raw[1] << 8 if len(raw) >= 2 else None
+
+        result = await self._with_client(_write_read)
+        if self.data is not None and result is not None:
+            self.async_set_updated_data({**self.data, e2_data_key(index): result})
         return result
 
     async def async_set_status_bit(

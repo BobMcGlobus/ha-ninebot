@@ -36,6 +36,8 @@ async def async_setup_entry(
     if coordinator.protocol == PROTOCOL_V2:
         # Write support for the newer protocol is not implemented yet.
         return
+    if coordinator.is_e2:
+        return  # the G30's lock bit in 0x1D is not mapped on an E2
     async_add_entities([NinebotLock(coordinator)])
 
 

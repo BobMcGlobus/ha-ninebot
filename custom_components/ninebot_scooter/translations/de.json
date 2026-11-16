@@ -134,7 +134,8 @@
         "state": {
           "off": "Aus",
           "low": "Schwach",
-          "standard": "Standard"
+          "standard": "Standard",
+          "strong": "Stark"
         }
       },
       "kers_level": {

@@ -54,6 +54,9 @@ async def async_setup_entry(
     if coordinator.protocol == PROTOCOL_V2:
         # Write support for the newer protocol is not implemented yet.
         return
+    if coordinator.is_e2:
+        # No cruise control on an E2, and 0x7D is its units setting, not a light.
+        return
     async_add_entities(NinebotSwitch(coordinator, desc) for desc in SWITCHES)
 
 
