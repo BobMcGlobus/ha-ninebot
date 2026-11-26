@@ -130,6 +130,19 @@ def _loggable(plaintext: bytes) -> str:
     return plaintext.hex().upper()
 
 
+def _frame_loggable(frame: Frame) -> str:
+    """A decoded frame for the log, with handshake payloads hidden.
+
+    The PRE_COMM reply carries the challenge the SET_PWD key is derived from.
+    """
+    if frame.command in (CMD_PRE_COMM, CMD_SET_PWD, CMD_AUTH):
+        return (
+            f"Frame(target=0x{frame.target:02X}, command=0x{frame.command:02X}, "
+            f"index={frame.index}, payload=<{len(frame.payload)} bytes redacted>)"
+        )
+    return repr(frame)
+
+
 def _link_mtu(client: BleakClient) -> int | None:
     """The ATT MTU the link negotiated, or None if the stack does not know it.
 
@@ -186,6 +199,11 @@ class NinebotV2Client:
         self._undecryptable = 0
         # The last frames we sent, as they went out, to recognise echoes.
         self._recent_tx: list[bytes] = []
+        # Until AUTH succeeds, raw bytes stay out of the log. The PRE_COMM reply
+        # and the encrypted SET_PWD together give away the password: the reply
+        # is keyed on the device name alone, and its challenge plus that name is
+        # the SET_PWD key.
+        self._authenticated = False
 
     @property
     def is_connected(self) -> bool:
@@ -297,6 +315,7 @@ class NinebotV2Client:
         # A vehicle answers only when the sync byte, the keystream and the GATT
         # channel all match its generation. Every wrong combination fails the same
         # silent way, so try the real ones rather than mixing them.
+        self._authenticated = False
         response = None
         candidates = (self.generation,) if self.generation else (GEN3, GEN2)
         boards = (self.ble_board,) if self.ble_board else (BOARD_BLE, BOARD_BLE_CLASSIC)
@@ -459,6 +478,7 @@ class NinebotV2Client:
                 "Vehicle rejected authentication - the stored pairing is no longer "
                 "valid, reconnect and confirm pairing on the vehicle"
             )
+        self._authenticated = True
         _LOGGER.debug("Authenticated successfully")
 
     async def _set_password(
@@ -589,7 +609,7 @@ class NinebotV2Client:
                 break
             if frame.command == expect:
                 return frame
-            _LOGGER.debug("Ignoring unexpected frame: %s", frame)
+            _LOGGER.debug("Ignoring unexpected frame: %s", _frame_loggable(frame))
 
         raise TimeoutError(
             f"No response to command 0x{command:02X} index 0x{index:02X}"
@@ -605,7 +625,7 @@ class NinebotV2Client:
         _LOGGER.debug(
             "TX plain %s -> enc %s (%d bytes, %s)",
             _loggable(plaintext),
-            data.hex().upper(),
+            data.hex().upper() if self._authenticated else "<redacted>",
             len(data),
             "with response" if self._write_with_response else "no response",
         )
@@ -642,7 +662,7 @@ class NinebotV2Client:
         _LOGGER.debug(
             "RX on %s: %s (%d bytes)",
             getattr(sender, "uuid", "?"),
-            bytes(data).hex().upper(),
+            bytes(data).hex().upper() if self._authenticated else "<redacted>",
             len(data),
         )
         self._rx_buffer += data
@@ -696,7 +716,7 @@ class NinebotV2Client:
                     "Reply we could not decrypt (status %d, %d bytes): %s",
                     status,
                     len(raw),
-                    raw.hex().upper(),
+                    raw.hex().upper() if self._authenticated else "<redacted>",
                 )
                 continue
             frame = parse_frame(plaintext)
