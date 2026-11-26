@@ -366,12 +366,19 @@ class NinebotClient:
         assert self.client is not None, "Must be connected first."
         _LOGGER.debug("Sending %s", packet)
         msg = self.crypto.encrypt(packet.pack())
+        # The encrypted PING still carries the app key.
+        secret = packet.command in _KEY_BEARING
         msg_len = len(msg)
         byte_idx = 0
         while msg_len > 0:
             tmp_len = msg_len if msg_len <= 20 else 20
             buf = msg[byte_idx : byte_idx + tmp_len]
-            _LOGGER.debug("Sending chuck %d/%d: %s", byte_idx + tmp_len, len(msg), hexlify(buf).upper().decode())
+            _LOGGER.debug(
+                "Sending chunk %d/%d: %s",
+                byte_idx + tmp_len,
+                len(msg),
+                "<redacted>" if secret else hexlify(buf).upper().decode(),
+            )
             await self.client.write_gatt_char(NORDIC_UART_RX_UUID, buf)
             msg_len -= tmp_len
             byte_idx += tmp_len
